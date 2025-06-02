@@ -1,0 +1,777 @@
+*****************************************************************************************************************************************
+*  Project Name :           SNF DID Analysis				 																			*
+*  Principal Investigator : Burke																										*
+*  Name of Program :        4_Add_Variables.sas																							*
+*  Programmer :             J Heintz
+*  Proofread :				F Hutchins 8/23/24                                                                 							*
+*  Start Date :             March 29th, 2024	 
+*  Dataset created : 		FOIADATA.FOIA_W_MBSF_11_21                                                              							*
+*  Purpose : 				Bring in county codes and Medicare eligibility codes
+
+This program applies logic published under the Skilled Nursing Facility 
+Value-Based Purchasing (SNF VBP) Program. See:
+https://www.cms.gov/medicare/quality/nursing-home-improvement/value-based-purchasing/measures
+
+Specific code files were provided by CMS via the following Freedom of Information Act (FOIA) request: 
+
+Control/ID Number: 042320237001
+Request Submitted to CMS: 04/26/2023
+Records Released: 02/26/2024
+Subject: Risk-Standardized Readmissions Rates
+Submitting organization: University of Pennsylvania
+
+This program is adapted to use MBSF beneficiary data in place of EDB files.
+*****************************************************************************************************************************************;
+
+*Run library locations;
+%include '[filepath to code writing library locations]';
+
+
+****************************************************************************************
+Step 1: Pulling in readmission data and seperating into 
+pre and post time periods (2011-2014 and 2015-2021)
+****************************************************************************************;
+
+DATA visits_PRE VISITS_POST_20_21; 
+SET FOIADATA.foia_icd9 FOIADATA.foia_icd10; /*Created datasets from 3a_Unplanned_ICD9.sas and 3a_Unplanned_ICD10.sas*/  
+
+SNF_ADM_YEAR=YEAR(SNF_ADMSNDT);
+PROX_ADM_YEAR=YEAR(PROX_ADMSN);
+PROX_DSC_YEAR=YEAR(Prox_DSCHRGDT);
+
+IF SNF_ADM_YEAR<=2014 THEN OUTPUT visits_PRE;
+	ELSE OUTPUT VISITS_POST_20_21;
+RUN;
+
+
+****************************************************************************************
+Step 2: GETTING County FIPS ID 2011-2014
+****************************************************************************************;
+options validvarname=v7;
+proc import datafile="[filepath]/ssa_fips_state_county2011.csv"
+	out=fips2011
+	dbms=csv
+	replace;
+	getnames=yes;
+	datarow=3;
+	guessingrows=500;
+run;
+proc import datafile="[filepath]/ssa_fips_state_county2012.csv"
+	out=fips2012
+	dbms=csv
+	replace;
+	getnames=yes;
+	datarow=3;
+	guessingrows=500;
+run;
+proc import datafile="[filepath]/ssa_fips_state_county2013.csv"
+	out=fips2013
+	dbms=csv
+	replace;
+	getnames=yes;
+/* 	datarow=3; */
+	guessingrows=500;
+run;
+proc import datafile="[filepath]/ssa_fips_state_county2014.csv"
+	out=fips2014
+	dbms=csv
+	replace;
+	getnames=yes;
+/* 	datarow=3; */
+	guessingrows=500;
+run;
+
+proc sql noprint;
+	create table fips_all as 
+	select distinct a.ssacounty as ssacounty2011, a.fipscounty as fipscounty2011,
+		b.ssacounty as ssacounty2012, b.fipscounty as fipscounty2012,
+		c.ssacounty as ssacounty2013, c.fipscounty as fipscounty2013, 
+		d.ssacounty as ssacounty2014, d.fipscounty as fipscounty2014 
+	from fips2011 as a 
+	full join fips2012 as b on a.ssacounty=b.ssacounty
+	full join fips2013 as c on a.ssacounty=c.ssacounty
+	full join fips2014 as d on a.ssacounty=d.ssacounty;
+quit;
+proc sql noprint;
+	create table bene_fips2011 as 
+	select bene_id, cats(state_cd, cnty_cd) as ssacounty from bene.dn100mod_2011 where state_cd ne ''
+	;
+
+	create table bene_fips2011_2 as 
+	select a.*, b.fipscounty2011, b.fipscounty2012, b.fipscounty2013, b.fipscounty2014 
+	from bene_fips2011 as a	left join fips_all as b 
+	on a.ssacounty=b.ssacounty2011
+	;	
+
+	create table bene_fips2012 as 
+	select bene_id, 
+/* 	case when state_cd ne '' then state_cd else "00" end as state_cd_n,  */
+/* 	case when cnty_cd ne '' then cnty_cd else "999" end as cnty_cd_n, */
+	cats(state_cd, cnty_cd) as ssacounty 
+	from bene.dn100mod_2012 where state_cd ne ''
+	;
+	create table bene_fips2012_2 as 
+	select a.*, b.fipscounty2011, b.fipscounty2012, b.fipscounty2013, b.fipscounty2014 from bene_fips2012 as a
+	left join fips_all as b on a.ssacounty=b.ssacounty2012
+	;
+	
+	create table bene_fips2013 as 
+	select bene_id, cats(state_cd, cnty_cd) as ssacounty from bene.dn100mod_2013 where state_cd ne ''
+	;
+	create table bene_fips2014 as 
+	select bene_id, cats(state_cd, cnty_cd) as ssacounty from bene.dn100mod_2014 where state_cd ne ''
+	;
+
+	create table bene_fips2013_2 as 
+	select a.*, b.fipscounty2011, b.fipscounty2012, b.fipscounty2013, b.fipscounty2014 from bene_fips2013 as a
+	left join fips_all as b on a.ssacounty=b.ssacounty2013
+	;	
+	create table bene_fips2014_2 as 
+	select a.*, b.fipscounty2011, b.fipscounty2012, b.fipscounty2013, b.fipscounty2014 from bene_fips2014 as a
+	left join fips_all as b on a.ssacounty=b.ssacounty2014
+	;
+	
+quit;
+
+proc sql noprint;
+	create table visits_PRE_FIPS as 
+	select distinct a.*, case when year(a.SNF_ADMSNDT)=2011 then b.fipscounty2011
+								 when year(a.SNF_ADMSNDT)=2012 then c.fipscounty2012
+						 		when year(a.SNF_ADMSNDT)=2013 then d.fipscounty2013
+						 		when year(a.SNF_ADMSNDT)=2014 then e.fipscounty2014 
+						 		else  "" end as FIPS_CD 
+		from visits_PRE as a 
+		left join bene_fips2011_2 as b on a.bene_id=b.bene_id
+		left join bene_fips2012_2 as c on a.bene_id=c.bene_id
+		left join bene_fips2013_2 as d on a.bene_id=d.bene_id
+		left join bene_fips2014_2 as e on a.bene_id=e.bene_id
+		; 
+quit;
+
+
+
+****************************************************************************************
+
+MBSF: Adding fips for 2015 - 2021 and MBSF eligibility codes all years
+ 
+*******************************************************************;
+PROC SQL;
+create table BENE_2020 as 
+select bene_id,	BENE_ENROLLMT_REF_YR AS rfrnc_yr,	RTI_RACE_CD, ZIP_CD as Bene_ZIP,	COVSTART, STATE_CODE AS STATE_CD, COUNTY_CD AS CNTY_CD,	ENTLMT_RSN_ORIG AS OREC, ENTLMT_RSN_CURR AS CREC,	ESRD_IND,	STATE_CNTY_FIPS_CD_01,	STATE_CNTY_FIPS_CD_02,	STATE_CNTY_FIPS_CD_03,	STATE_CNTY_FIPS_CD_04,	STATE_CNTY_FIPS_CD_05,	STATE_CNTY_FIPS_CD_06,	STATE_CNTY_FIPS_CD_07,	STATE_CNTY_FIPS_CD_08,	STATE_CNTY_FIPS_CD_09,	STATE_CNTY_FIPS_CD_10,	STATE_CNTY_FIPS_CD_11,	STATE_CNTY_FIPS_CD_12,	BENE_BIRTH_DT AS bene_dob,	SEX_IDENT_CD AS sex,	HMO_IND_01 AS HMOIND01,	HMO_IND_02 AS HMOIND02,	HMO_IND_03 AS HMOIND03,	HMO_IND_04 AS HMOIND04,	HMO_IND_05 AS HMOIND05,	HMO_IND_06 AS HMOIND06,	HMO_IND_07 AS HMOIND07,	HMO_IND_08 AS HMOIND08,	HMO_IND_09 AS HMOIND09,	HMO_IND_10 AS HMOIND10,	HMO_IND_11 AS HMOIND11,	HMO_IND_12 AS HMOIND12,	MDCR_ENTLMT_BUYIN_IND_01 AS BUYIN01,	MDCR_ENTLMT_BUYIN_IND_02 AS BUYIN02,	MDCR_ENTLMT_BUYIN_IND_03 AS BUYIN03,	MDCR_ENTLMT_BUYIN_IND_04 AS BUYIN04,	MDCR_ENTLMT_BUYIN_IND_05 AS BUYIN05,	MDCR_ENTLMT_BUYIN_IND_06 AS BUYIN06,	MDCR_ENTLMT_BUYIN_IND_07 AS BUYIN07,	MDCR_ENTLMT_BUYIN_IND_08 AS BUYIN08,	MDCR_ENTLMT_BUYIN_IND_09 AS BUYIN09,	MDCR_ENTLMT_BUYIN_IND_10 AS BUYIN10,	MDCR_ENTLMT_BUYIN_IND_11 AS BUYIN11,	MDCR_ENTLMT_BUYIN_IND_12 AS BUYIN12,	MDCR_STATUS_CODE_01,	MDCR_STATUS_CODE_02,	MDCR_STATUS_CODE_03,	MDCR_STATUS_CODE_04,	MDCR_STATUS_CODE_05,	MDCR_STATUS_CODE_06,	MDCR_STATUS_CODE_07,	MDCR_STATUS_CODE_08,	MDCR_STATUS_CODE_09,	MDCR_STATUS_CODE_10,	MDCR_STATUS_CODE_11,	MDCR_STATUS_CODE_12,	BENE_DEATH_DT AS DEATH_DT,	PTC_PLAN_TYPE_CD_01,	PTC_PLAN_TYPE_CD_02,	PTC_PLAN_TYPE_CD_03,	PTC_PLAN_TYPE_CD_04,	PTC_PLAN_TYPE_CD_05,	PTC_PLAN_TYPE_CD_06,	PTC_PLAN_TYPE_CD_07,	PTC_PLAN_TYPE_CD_08,	PTC_PLAN_TYPE_CD_09,	PTC_PLAN_TYPE_CD_10,	PTC_PLAN_TYPE_CD_11,	PTC_PLAN_TYPE_CD_12,	DUAL_STUS_CD_01,	DUAL_STUS_CD_02,	DUAL_STUS_CD_03,	DUAL_STUS_CD_04,	DUAL_STUS_CD_05,	DUAL_STUS_CD_06,	DUAL_STUS_CD_07,	DUAL_STUS_CD_08,	DUAL_STUS_CD_09,	DUAL_STUS_CD_10,	DUAL_STUS_CD_11,	DUAL_STUS_CD_12,	VALID_DEATH_DT_SW AS V_DOD_SW,
+2020 as year_w, RTI_RACE_CD as RTI_RACE_2020  
+from bene.MBSF_ABCD_SUMMARY_2020
+(keep=bene_id	BENE_ENROLLMT_REF_YR	RTI_RACE_CD	COVSTART ZIP_CD	ENTLMT_RSN_ORIG	ESRD_IND	STATE_CODE COUNTY_CD ENTLMT_RSN_CURR STATE_CNTY_FIPS_CD_01	STATE_CNTY_FIPS_CD_02	STATE_CNTY_FIPS_CD_03	STATE_CNTY_FIPS_CD_04	STATE_CNTY_FIPS_CD_05	STATE_CNTY_FIPS_CD_06	STATE_CNTY_FIPS_CD_07	STATE_CNTY_FIPS_CD_08	STATE_CNTY_FIPS_CD_09	STATE_CNTY_FIPS_CD_10	STATE_CNTY_FIPS_CD_11	STATE_CNTY_FIPS_CD_12		BENE_BIRTH_DT	SEX_IDENT_CD	HMO_IND_01	HMO_IND_02	HMO_IND_03	HMO_IND_04	HMO_IND_05	HMO_IND_06	HMO_IND_07	HMO_IND_08	HMO_IND_09	HMO_IND_10	HMO_IND_11	HMO_IND_12	MDCR_ENTLMT_BUYIN_IND_01	MDCR_ENTLMT_BUYIN_IND_02	MDCR_ENTLMT_BUYIN_IND_03	MDCR_ENTLMT_BUYIN_IND_04	MDCR_ENTLMT_BUYIN_IND_05	MDCR_ENTLMT_BUYIN_IND_06	MDCR_ENTLMT_BUYIN_IND_07	MDCR_ENTLMT_BUYIN_IND_08	MDCR_ENTLMT_BUYIN_IND_09	MDCR_ENTLMT_BUYIN_IND_10	MDCR_ENTLMT_BUYIN_IND_11	MDCR_ENTLMT_BUYIN_IND_12	MDCR_STATUS_CODE_01	MDCR_STATUS_CODE_02	MDCR_STATUS_CODE_03	MDCR_STATUS_CODE_04	MDCR_STATUS_CODE_05	MDCR_STATUS_CODE_06	MDCR_STATUS_CODE_07	MDCR_STATUS_CODE_08	MDCR_STATUS_CODE_09	MDCR_STATUS_CODE_10	MDCR_STATUS_CODE_11	MDCR_STATUS_CODE_12	BENE_DEATH_DT	PTC_PLAN_TYPE_CD_01	PTC_PLAN_TYPE_CD_02	PTC_PLAN_TYPE_CD_03	PTC_PLAN_TYPE_CD_04	PTC_PLAN_TYPE_CD_05	PTC_PLAN_TYPE_CD_06	PTC_PLAN_TYPE_CD_07	PTC_PLAN_TYPE_CD_08	PTC_PLAN_TYPE_CD_09	PTC_PLAN_TYPE_CD_10	PTC_PLAN_TYPE_CD_11	PTC_PLAN_TYPE_CD_12	DUAL_STUS_CD_01	DUAL_STUS_CD_02	DUAL_STUS_CD_03	DUAL_STUS_CD_04	DUAL_STUS_CD_05	DUAL_STUS_CD_06	DUAL_STUS_CD_07	DUAL_STUS_CD_08	DUAL_STUS_CD_09	DUAL_STUS_CD_10	DUAL_STUS_CD_11	DUAL_STUS_CD_12 VALID_DEATH_DT_SW
+)
+;
+create table BENE_2021 as 
+select bene_id,	BENE_ENROLLMT_REF_YR AS rfrnc_yr,	RTI_RACE_CD, ZIP_CD as Bene_ZIP,	COVSTART, STATE_CODE AS STATE_CD, COUNTY_CD AS CNTY_CD,	ENTLMT_RSN_ORIG AS OREC, ENTLMT_RSN_CURR AS CREC,	ESRD_IND,	STATE_CNTY_FIPS_CD_01,	STATE_CNTY_FIPS_CD_02,	STATE_CNTY_FIPS_CD_03,	STATE_CNTY_FIPS_CD_04,	STATE_CNTY_FIPS_CD_05,	STATE_CNTY_FIPS_CD_06,	STATE_CNTY_FIPS_CD_07,	STATE_CNTY_FIPS_CD_08,	STATE_CNTY_FIPS_CD_09,	STATE_CNTY_FIPS_CD_10,	STATE_CNTY_FIPS_CD_11,	STATE_CNTY_FIPS_CD_12,	BENE_BIRTH_DT AS bene_dob,	SEX_IDENT_CD AS sex,	HMO_IND_01 AS HMOIND01,	HMO_IND_02 AS HMOIND02,	HMO_IND_03 AS HMOIND03,	HMO_IND_04 AS HMOIND04,	HMO_IND_05 AS HMOIND05,	HMO_IND_06 AS HMOIND06,	HMO_IND_07 AS HMOIND07,	HMO_IND_08 AS HMOIND08,	HMO_IND_09 AS HMOIND09,	HMO_IND_10 AS HMOIND10,	HMO_IND_11 AS HMOIND11,	HMO_IND_12 AS HMOIND12,	MDCR_ENTLMT_BUYIN_IND_01 AS BUYIN01,	MDCR_ENTLMT_BUYIN_IND_02 AS BUYIN02,	MDCR_ENTLMT_BUYIN_IND_03 AS BUYIN03,	MDCR_ENTLMT_BUYIN_IND_04 AS BUYIN04,	MDCR_ENTLMT_BUYIN_IND_05 AS BUYIN05,	MDCR_ENTLMT_BUYIN_IND_06 AS BUYIN06,	MDCR_ENTLMT_BUYIN_IND_07 AS BUYIN07,	MDCR_ENTLMT_BUYIN_IND_08 AS BUYIN08,	MDCR_ENTLMT_BUYIN_IND_09 AS BUYIN09,	MDCR_ENTLMT_BUYIN_IND_10 AS BUYIN10,	MDCR_ENTLMT_BUYIN_IND_11 AS BUYIN11,	MDCR_ENTLMT_BUYIN_IND_12 AS BUYIN12,	MDCR_STATUS_CODE_01,	MDCR_STATUS_CODE_02,	MDCR_STATUS_CODE_03,	MDCR_STATUS_CODE_04,	MDCR_STATUS_CODE_05,	MDCR_STATUS_CODE_06,	MDCR_STATUS_CODE_07,	MDCR_STATUS_CODE_08,	MDCR_STATUS_CODE_09,	MDCR_STATUS_CODE_10,	MDCR_STATUS_CODE_11,	MDCR_STATUS_CODE_12,	BENE_DEATH_DT AS DEATH_DT,	PTC_PLAN_TYPE_CD_01,	PTC_PLAN_TYPE_CD_02,	PTC_PLAN_TYPE_CD_03,	PTC_PLAN_TYPE_CD_04,	PTC_PLAN_TYPE_CD_05,	PTC_PLAN_TYPE_CD_06,	PTC_PLAN_TYPE_CD_07,	PTC_PLAN_TYPE_CD_08,	PTC_PLAN_TYPE_CD_09,	PTC_PLAN_TYPE_CD_10,	PTC_PLAN_TYPE_CD_11,	PTC_PLAN_TYPE_CD_12,	DUAL_STUS_CD_01,	DUAL_STUS_CD_02,	DUAL_STUS_CD_03,	DUAL_STUS_CD_04,	DUAL_STUS_CD_05,	DUAL_STUS_CD_06,	DUAL_STUS_CD_07,	DUAL_STUS_CD_08,	DUAL_STUS_CD_09,	DUAL_STUS_CD_10,	DUAL_STUS_CD_11,	DUAL_STUS_CD_12,	VALID_DEATH_DT_SW AS V_DOD_SW,
+2021 as year_w, RTI_RACE_CD as RTI_RACE_2021  
+from bene.MBSF_ABCD_SUMMARY_2021
+(keep=bene_id	BENE_ENROLLMT_REF_YR	RTI_RACE_CD	COVSTART ZIP_CD	ENTLMT_RSN_ORIG	ESRD_IND	STATE_CODE COUNTY_CD ENTLMT_RSN_CURR STATE_CNTY_FIPS_CD_01	STATE_CNTY_FIPS_CD_02	STATE_CNTY_FIPS_CD_03	STATE_CNTY_FIPS_CD_04	STATE_CNTY_FIPS_CD_05	STATE_CNTY_FIPS_CD_06	STATE_CNTY_FIPS_CD_07	STATE_CNTY_FIPS_CD_08	STATE_CNTY_FIPS_CD_09	STATE_CNTY_FIPS_CD_10	STATE_CNTY_FIPS_CD_11	STATE_CNTY_FIPS_CD_12		BENE_BIRTH_DT	SEX_IDENT_CD	HMO_IND_01	HMO_IND_02	HMO_IND_03	HMO_IND_04	HMO_IND_05	HMO_IND_06	HMO_IND_07	HMO_IND_08	HMO_IND_09	HMO_IND_10	HMO_IND_11	HMO_IND_12	MDCR_ENTLMT_BUYIN_IND_01	MDCR_ENTLMT_BUYIN_IND_02	MDCR_ENTLMT_BUYIN_IND_03	MDCR_ENTLMT_BUYIN_IND_04	MDCR_ENTLMT_BUYIN_IND_05	MDCR_ENTLMT_BUYIN_IND_06	MDCR_ENTLMT_BUYIN_IND_07	MDCR_ENTLMT_BUYIN_IND_08	MDCR_ENTLMT_BUYIN_IND_09	MDCR_ENTLMT_BUYIN_IND_10	MDCR_ENTLMT_BUYIN_IND_11	MDCR_ENTLMT_BUYIN_IND_12	MDCR_STATUS_CODE_01	MDCR_STATUS_CODE_02	MDCR_STATUS_CODE_03	MDCR_STATUS_CODE_04	MDCR_STATUS_CODE_05	MDCR_STATUS_CODE_06	MDCR_STATUS_CODE_07	MDCR_STATUS_CODE_08	MDCR_STATUS_CODE_09	MDCR_STATUS_CODE_10	MDCR_STATUS_CODE_11	MDCR_STATUS_CODE_12	BENE_DEATH_DT	PTC_PLAN_TYPE_CD_01	PTC_PLAN_TYPE_CD_02	PTC_PLAN_TYPE_CD_03	PTC_PLAN_TYPE_CD_04	PTC_PLAN_TYPE_CD_05	PTC_PLAN_TYPE_CD_06	PTC_PLAN_TYPE_CD_07	PTC_PLAN_TYPE_CD_08	PTC_PLAN_TYPE_CD_09	PTC_PLAN_TYPE_CD_10	PTC_PLAN_TYPE_CD_11	PTC_PLAN_TYPE_CD_12	DUAL_STUS_CD_01	DUAL_STUS_CD_02	DUAL_STUS_CD_03	DUAL_STUS_CD_04	DUAL_STUS_CD_05	DUAL_STUS_CD_06	DUAL_STUS_CD_07	DUAL_STUS_CD_08	DUAL_STUS_CD_09	DUAL_STUS_CD_10	DUAL_STUS_CD_11	DUAL_STUS_CD_12 VALID_DEATH_DT_SW
+);
+QUIT;
+%MACRO MBSF(MIN_YEAR, MAX_YEAR);
+
+	%LET NUM_YEARS=%EVAL(&MAX_YEAR.-&MIN_YEAR.+1);
+
+	%DO YEAR=&MIN_YEAR. %TO &MAX_YEAR.;
+		%IF &YEAR.<=2014 %THEN %DO;
+			DATA mbsf_abcd_&YEAR; SET bene.dn100mod_&YEAR (KEEP=BENE_ID sex MS_CD CREC OREC ESRD_IND STATE_CD CNTY_CD Bene_ZIP RTI_RACE_CD );
+				RENAME RTI_RACE_CD=RTI_RACE_CD&YEAR;
+				RENAME OREC=OREC&YEAR;
+				RENAME ESRD_IND=ESRD_IND&YEAR;
+				RENAME STATE_CD=STATE_CD&YEAR;
+				RENAME CNTY_CD=CNTY_CD&YEAR;
+				RENAME sex=sex&YEAR;
+				RENAME Bene_ZIP=Bene_ZIP&YEAR;			
+				RENAME MS_CD=MS_CD&YEAR;
+				RENAME CREC=CREC&YEAR;	
+	
+			RUN;
+			PROC SORT DATA=mbsf_abcd_&YEAR; BY BENE_ID;RUN;
+		%END;	
+		%IF &YEAR.<2020 & &YEAR.>2014 %THEN %DO;
+			DATA mbsf_abcd_&YEAR; SET bene.dn100mod_&YEAR (KEEP=BENE_ID sex /*MS_CD*/ CREC OREC ESRD_IND STATE_CD CNTY_CD Bene_ZIP RTI_RACE_CD STATE_CNTY_FIPS_CD_01-STATE_CNTY_FIPS_CD_09 STATE_CNTY_FIPS_CD_10 STATE_CNTY_FIPS_CD_11 STATE_CNTY_FIPS_CD_12);
+				RENAME RTI_RACE_CD=RTI_RACE_CD&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_01=STATE_CNTY_FIPS_CD_01_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_02=STATE_CNTY_FIPS_CD_02_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_03=STATE_CNTY_FIPS_CD_03_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_04=STATE_CNTY_FIPS_CD_04_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_05=STATE_CNTY_FIPS_CD_05_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_06=STATE_CNTY_FIPS_CD_06_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_07=STATE_CNTY_FIPS_CD_07_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_08=STATE_CNTY_FIPS_CD_08_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_09=STATE_CNTY_FIPS_CD_09_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_10=STATE_CNTY_FIPS_CD_10_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_11=STATE_CNTY_FIPS_CD_11_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_12=STATE_CNTY_FIPS_CD_12_&YEAR;
+				RENAME OREC=OREC&YEAR;
+				RENAME ESRD_IND=ESRD_IND&YEAR;
+				RENAME STATE_CD=STATE_CD&YEAR;
+				RENAME CNTY_CD=CNTY_CD&YEAR;
+				RENAME sex=sex&YEAR;
+				RENAME Bene_ZIP=Bene_ZIP&YEAR;		
+				RENAME CREC=CREC&YEAR;	
+				/*RENAME MS_CD=MS_CD&YEAR;*/
+			RUN;
+			PROC SORT DATA=mbsf_abcd_&YEAR; BY BENE_ID;RUN;
+		%END;
+		%IF &YEAR.>=2020 %THEN %DO;
+			DATA mbsf_abcd_&YEAR; SET BENE_&YEAR (KEEP=BENE_ID sex /*MS_CD*/ CREC OREC ESRD_IND STATE_CD CNTY_CD Bene_ZIP RTI_RACE_CD STATE_CNTY_FIPS_CD_01-STATE_CNTY_FIPS_CD_09 STATE_CNTY_FIPS_CD_10 STATE_CNTY_FIPS_CD_11 STATE_CNTY_FIPS_CD_12);
+				RENAME RTI_RACE_CD=RTI_RACE_CD&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_01=STATE_CNTY_FIPS_CD_01_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_02=STATE_CNTY_FIPS_CD_02_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_03=STATE_CNTY_FIPS_CD_03_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_04=STATE_CNTY_FIPS_CD_04_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_05=STATE_CNTY_FIPS_CD_05_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_06=STATE_CNTY_FIPS_CD_06_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_07=STATE_CNTY_FIPS_CD_07_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_08=STATE_CNTY_FIPS_CD_08_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_09=STATE_CNTY_FIPS_CD_09_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_10=STATE_CNTY_FIPS_CD_10_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_11=STATE_CNTY_FIPS_CD_11_&YEAR;
+				RENAME STATE_CNTY_FIPS_CD_12=STATE_CNTY_FIPS_CD_12_&YEAR;
+				RENAME OREC=OREC&YEAR;
+				RENAME ESRD_IND=ESRD_IND&YEAR;
+				RENAME STATE_CD=STATE_CD&YEAR;
+				RENAME CNTY_CD=CNTY_CD&YEAR;
+				RENAME sex=sex&YEAR;
+				RENAME Bene_ZIP=Bene_ZIP&YEAR;		
+				RENAME CREC=CREC&YEAR;	
+				/*RENAME MS_CD=MS_CD&YEAR;*/
+			RUN;
+			PROC SORT DATA=mbsf_abcd_&YEAR; BY BENE_ID;RUN;
+		%END;	
+	%END;
+	
+	data MBSF_abcd_ALLYEARS;
+		merge %do YEAR=&MIN_YEAR. %TO &MAX_YEAR; mbsf_abcd_&YEAR %end;;
+		by BENE_ID;
+	run;
+
+	PROC DATASETS LIBRARY=WORK;
+	  DELETE %do YEAR=&MIN_YEAR. %TO &MAX_YEAR.; mbsf_abcd_&YEAR. %end;;
+	  RUN;
+
+	DATA visits; SET visits_PRE_FIPS VISITS_POST_20_21; RUN;
+	proc sql;
+		create table TEMP_MBSF as
+		select distinct a.*, b.*  from
+		visits as a LEFT join MBSF_abcd_ALLYEARS  as b 
+		on a.BENE_ID=b.BENE_ID;
+	quit;
+	
+	PROC DATASETS LIBRARY=WORK;
+	  DELETE MBSF_abcd_ALLYEARS ;
+	RUN;
+
+	DATA TEMP_MBSF2; SET TEMP_MBSF;
+		ARRAY A{&NUM_YEARS.} OREC&MIN_YEAR.-OREC&MAX_YEAR.;
+		ARRAY B{&NUM_YEARS.} ESRD_IND&MIN_YEAR.-ESRD_IND&MAX_YEAR.;
+		ARRAY C{&NUM_YEARS.} RTI_RACE_CD&MIN_YEAR.-RTI_RACE_CD&MAX_YEAR.;
+		ARRAY D{&NUM_YEARS.} sex&MIN_YEAR.-sex&MAX_YEAR.;
+		ARRAY E{&NUM_YEARS.} STATE_CD&MIN_YEAR.-STATE_CD&MAX_YEAR.;
+		ARRAY F{&NUM_YEARS.} CNTY_CD&MIN_YEAR.-CNTY_CD&MAX_YEAR.;
+		ARRAY G{&NUM_YEARS.} Bene_ZIP&MIN_YEAR.-Bene_ZIP&MAX_YEAR.;
+		ARRAY H{&NUM_YEARS.} STATE_CNTY_FIPS_CD_01_&MIN_YEAR.-STATE_CNTY_FIPS_CD_01_&MAX_YEAR.;
+		ARRAY I{&NUM_YEARS.} STATE_CNTY_FIPS_CD_02_&MIN_YEAR.-STATE_CNTY_FIPS_CD_02_&MAX_YEAR.;
+		ARRAY J{&NUM_YEARS.} STATE_CNTY_FIPS_CD_03_&MIN_YEAR.-STATE_CNTY_FIPS_CD_03_&MAX_YEAR.;
+		ARRAY K{&NUM_YEARS.} STATE_CNTY_FIPS_CD_04_&MIN_YEAR.-STATE_CNTY_FIPS_CD_04_&MAX_YEAR.;
+		ARRAY L{&NUM_YEARS.} STATE_CNTY_FIPS_CD_05_&MIN_YEAR.-STATE_CNTY_FIPS_CD_05_&MAX_YEAR.;
+		ARRAY M{&NUM_YEARS.} STATE_CNTY_FIPS_CD_06_&MIN_YEAR.-STATE_CNTY_FIPS_CD_06_&MAX_YEAR.;
+		ARRAY N{&NUM_YEARS.} STATE_CNTY_FIPS_CD_07_&MIN_YEAR.-STATE_CNTY_FIPS_CD_07_&MAX_YEAR.;
+		ARRAY O{&NUM_YEARS.} STATE_CNTY_FIPS_CD_08_&MIN_YEAR.-STATE_CNTY_FIPS_CD_08_&MAX_YEAR.;
+		ARRAY P{&NUM_YEARS.} STATE_CNTY_FIPS_CD_09_&MIN_YEAR.-STATE_CNTY_FIPS_CD_09_&MAX_YEAR.;
+		ARRAY Q{&NUM_YEARS.} STATE_CNTY_FIPS_CD_10_&MIN_YEAR.-STATE_CNTY_FIPS_CD_10_&MAX_YEAR.;
+		ARRAY R{&NUM_YEARS.} STATE_CNTY_FIPS_CD_11_&MIN_YEAR.-STATE_CNTY_FIPS_CD_11_&MAX_YEAR.;
+		ARRAY S{&NUM_YEARS.} STATE_CNTY_FIPS_CD_12_&MIN_YEAR.-STATE_CNTY_FIPS_CD_12_&MAX_YEAR.;
+		ARRAY T{&NUM_YEARS.} MS_CD&MIN_YEAR.-MS_CD&MAX_YEAR.;
+		ARRAY U{&NUM_YEARS.} CREC&MIN_YEAR.-CREC&MAX_YEAR.;
+		
+		DO NUM = 1 TO &NUM_YEARS.;
+			IF SNF_ADM_YEAR-&MIN_YEAR.+1=NUM THEN DO; 
+				OREC=A{NUM};
+				ESRD_IND=B{NUM};
+				RTI_RACE_CD=C{NUM};
+				Bene_ZIP=G{NUM};
+				CNTY_CD=F{NUM};
+				STATE_CD=E{NUM};
+				sex=D{NUM};
+				MS_CD=T{NUM};
+				CREC=U{NUM};
+			
+				STATE_CNTY_FIPS_CD01=H{NUM};
+				STATE_CNTY_FIPS_CD02=I{NUM};
+				STATE_CNTY_FIPS_CD03=J{NUM};
+				STATE_CNTY_FIPS_CD04=K{NUM};
+				STATE_CNTY_FIPS_CD05=L{NUM};
+				STATE_CNTY_FIPS_CD06=M{NUM};
+				STATE_CNTY_FIPS_CD07=N{NUM};
+				STATE_CNTY_FIPS_CD08=O{NUM};
+				STATE_CNTY_FIPS_CD09=P{NUM};
+				STATE_CNTY_FIPS_CD10=Q{NUM};
+				STATE_CNTY_FIPS_CD11=R{NUM};
+				STATE_CNTY_FIPS_CD12=S{NUM};
+			END;
+		END;					
+	RUN;
+	
+%MEND;
+%MBSF(2011,2021);
+
+DATA TEMP_MBSF3; 
+LENGTH FIPS_CD $ 8;
+ SET TEMP_MBSF2 
+ (DROP=STATE_CNTY_FIPS_CD_01_20: STATE_CNTY_FIPS_CD_02_20:
+	STATE_CNTY_FIPS_CD_03_20: STATE_CNTY_FIPS_CD_04_20: STATE_CNTY_FIPS_CD_05_20: STATE_CNTY_FIPS_CD_06_20:
+	STATE_CNTY_FIPS_CD_07_20: STATE_CNTY_FIPS_CD_08_20: STATE_CNTY_FIPS_CD_09_20: STATE_CNTY_FIPS_CD_10_20:
+	STATE_CNTY_FIPS_CD_11_20: STATE_CNTY_FIPS_CD_12_20: NUM OREC20: ESRD_IND20: Bene_ZIP20: RTI_RACE_CD20:
+	CNTY_CD20: MS_CD20: CREC20: sex20: STATE_CD20: CNTY_CD20:)
+	;
+
+ADM_MONTH=month(SNF_ADM_YEAR);
+IF FIPS_CD='' OR FIPS_CD='XXXXX' THEN DO;
+	IF ADM_MONTH=1 THEN FIPS_CD=STATE_CNTY_FIPS_CD01;
+		ELSE IF ADM_MONTH=2 THEN FIPS_CD=STATE_CNTY_FIPS_CD02;
+		ELSE IF ADM_MONTH=3 THEN FIPS_CD=STATE_CNTY_FIPS_CD03;
+		ELSE IF ADM_MONTH=4 THEN FIPS_CD=STATE_CNTY_FIPS_CD04;
+		ELSE IF ADM_MONTH=5 THEN FIPS_CD=STATE_CNTY_FIPS_CD05;
+		ELSE IF ADM_MONTH=6 THEN FIPS_CD=STATE_CNTY_FIPS_CD06;
+		ELSE IF ADM_MONTH=7 THEN FIPS_CD=STATE_CNTY_FIPS_CD07;
+		ELSE IF ADM_MONTH=8 THEN FIPS_CD=STATE_CNTY_FIPS_CD08;
+		ELSE IF ADM_MONTH=9 THEN FIPS_CD=STATE_CNTY_FIPS_CD09;
+		ELSE IF ADM_MONTH=10 THEN FIPS_CD=STATE_CNTY_FIPS_CD10;
+		ELSE IF ADM_MONTH=11 THEN FIPS_CD=STATE_CNTY_FIPS_CD11;
+		ELSE IF ADM_MONTH=12 THEN FIPS_CD=STATE_CNTY_FIPS_CD12;
+END;
+IF FIPS_CD='' THEN FIPS_CD='XXXXX';
+DROP ADM_MONTH ;
+RUN;
+PROC SORT DATA=TEMP_MBSF3 ; BY SNF_ADM_YEAR; RUN;
+DATA TEMP_MBSF4; SET TEMP_MBSF3;
+IF FIPS_CD='XXXXX' THEN FIPS_FLAG=1;
+ELSE IF FIPS_CD='' THEN FIPS_FLAG=2;
+ELSE FIPS_FLAG=0;
+RUN;
+PROC FREQ DATA=TEMP_MBSF4 ;
+BY SNF_ADM_YEAR;
+TABLES FIPS_FLAG;
+RUN;
+PROC FREQ DATA=TEMP_MBSF4 ;
+BY SNF_ADM_YEAR;
+TABLES RTI_RACE_CD;
+RUN;
+
+
+DATA ALL_VISITS4;LENGTH fips_cd $ 8;
+SET TEMP_MBSF3 (DROP=SNF_DGNS_CD01 SNF_ADMSN SNF_DSCHRG BENE_ID FLAG);
+RENAME SNF_BENE_ID=BENE_ID
+	PRCDR_CD1-PRCDR_CD25=SNF_PRCDR_CD1-SNF_PRCDR_CD25
+	SRGCL_PRCDR_VRSN_CD=SNF_SRGCL_PRCDR_VRSN_CD
+	SRGCL_PRCDR_VRSN_CD_1-SRGCL_PRCDR_VRSN_CD_25=SNF_SRGCL_PRCDR_VRSN_CD_1-SNF_SRGCL_PRCDR_VRSN_CD_25
+	DGNS_CD01-DGNS_CD25=SNF_DGNS_CD01-SNF_DGNS_CD25
+	DGNS_VRSN_CD_1-DGNS_VRSN_CD_25=SNF_DGNS_VRSN_CD_01-SNF_DGNS_VRSN_CD_25
+	DRG_CD=SNF_DRG_CD
+	DGNS_CD_CNT=SNF_DGNS_CD_CNT
+	SNF_MedPARRecordNumber=MedPARRecordNumber
+	Prior_0_covid=Prior_0
+	Prior_1_3_covid=Prior_1_3
+	Prior_4_6_covid=Prior_4_6
+	Prior_7_9_covid=Prior_7_9
+	Prior_GE_10_covid=Prior_GE_10
+	_MultipleSNFs_CNT=MultipleSNFs_CNT
+	_IPPS_Psych_FLAG=IPPS_Psych_FLAG
+	AGE_CNT=snf_age_cnt
+	Prox_MEDPAR_AGE_CNT=Prox_AGE_CNT
+	ORG_NPI_NUM=SNF_ORG_NPI_NUM
+	PRCDRCNT=SNF_PRCDRCNT
+	PRCDRSW=SNF_PRCDRSW
+	;
+
+IF ESRD_IND='' & OREC='' THEN ESRD=.;
+	 ELSE IF OREC IN('2','3') THEN ESRD=1;
+		ELSE IF ESRD_IND='Y' THEN ESRD=1;
+			ELSE ESRD=0;
+LABEL ESRD = 'MBSF: Derived End Stage Renal Disease (inclusive ESRD_IND OREC)';
+
+IF SNF_ADM_YEAR>2019 THEN TIME_PERIOD=3;
+	ELSE IF 2014<SNF_ADM_YEAR<=2019 THEN TIME_PERIOD=2;
+	ELSE IF SNF_ADM_YEAR>2010 THEN TIME_PERIOD=1;
+
+DROP PROX_ADMSN _PREVIOUS_PROV_TYPE _HOLD_DSC_E _PREVIOUS_MedPARRecordNumber _COUNT_SNF_INDEX_ADM START_DT1 STATE_CNTY_FIPS_CD_01-STATE_CNTY_FIPS_CD_12
+dschr_year dschr_mon death_year death_mon end_num start_num PROV_TYPE STATE_CNTY_FIPS_CD01-STATE_CNTY_FIPS_CD12 year;
+
+LABEL SNF_BENE_ID='Beneficiary ID';
+LABEL SNF_MedPARRecordNumber='unique MedPAR stay # for each SNF';
+LABEL TIME_PERIOD='MedPar: 1 = 2011-2014 acute admission | 2 = 2015-2019 acute admission | 3 = 2020-2021 acute admission';
+LABEL Bene_ZIP='MBSF: Beneficiary ZIP';
+LABEL CNTY_CD='MBSF: County Code';
+LABEL cov_admsn='MBSF: Medicare Coverage at admission';
+LABEL cov_all='MBSF: Medicare coverage type by month (Pretime: 2011-2014 | Posttime: 2015-2021)';
+LABEL cov_check='MBSF: Medicare coverage type for eligibility period by month';
+LABEL CREC='MBSF: Current Reason for Entitlement Code';
+LABEL DEATH_DT='MBSF: Beneficiary Date of Death';
+LABEL dual_all='MBSF: Dual eligibility type by month 2011-2014 admission (Pretime) or 2015-2019 admission (Posttime)';
+LABEL dual_check='MBSF: Dual eligibility at admission, X=Non-dual or not enrolled, F=full dual, P=partial dual, O=other but not Medicaid, 9=Missing';
+LABEL ESRD='MBSF: Derived End Stage Renal Disease (inclusive ESRD_IND OREC)';
+LABEL ESRD_IND='MBSF: End-Stage Renal Disease (ESRD) Indicator';
+LABEL fips_cd='SSA (Pretime) / MBSF (Posttime): FIPS code for the year of Inpatient admission date';
+LABEL MS_CD='MBSF: Medicare Status Code (Pretime Only)';
+LABEL OREC='MBSF: Original Reason for Entitlement Code';
+LABEL RTI_RACE_CD='MBSF: RTI Race Code';
+LABEL sex='MBSF: SEX';
+LABEL STATE_CD='MBSF: State Code';
+LABEL BENE_IDENT_CD='MedPar: Beneficiary’s identifier code';
+LABEL BENE_RSDNC_SSA_CNTY_CD='MedPar: SSA standard county code of a beneficiarys residence.';
+LABEL BENE_SEX_CD='MedPar: Beneficiary sex identifier';
+LABEL CLM_TYPE='MedPar: Claim type';
+LABEL DEATHCD='MedPar: Beneficiary Death Code';
+LABEL DEATHDT='MedPar: Beneficiary Date of Death';
+LABEL ICARECNT='MedPar: Intensive care days used by beneficiary for stay';
+LABEL ICUINDCD='MedPar: ICU type code';
+LABEL ORG_NPI_NUM='MedPar: SNF Organization NPI Number';
+LABEL PRCDRCNT='MedPar: Surgical procedure codes included in SNF stay';
+LABEL PRCDRSW='MedPar: Surgical procedures indicator';
+LABEL PROX_ADM_YEAR='MedPar: Inpatient admission year of acute hospitalization';
+LABEL Prox_admsndt='MedPar: Inpatient admission date of acute hospitalization';
+LABEL Prox_MEDPAR_AGE_CNT='MedPar: Age at date of Proximal admission';
+LABEL Prox_DGNS_CD01='MedPar: PROX Primary ICD-9-CM code';
+LABEL Prox_DGNS_CD02='MedPar: PROX ICD-9-CM Diagnosis code II';
+LABEL Prox_DGNS_CD03='MedPar: PROX ICD-9-CM Diagnosis code III';
+LABEL Prox_DGNS_CD04='MedPar: PROX ICD-9-CM Diagnosis code IV';
+LABEL Prox_DGNS_CD05='MedPar: PROX ICD-9-CM Diagnosis code V';
+LABEL Prox_DGNS_CD06='MedPar: PROX ICD-9-CM Diagnosis code VI';
+LABEL Prox_DGNS_CD07='MedPar: PROX ICD-9-CM Diagnosis code VII';
+LABEL Prox_DGNS_CD08='MedPar: PROX ICD-9-CM Diagnosis code VIII';
+LABEL Prox_DGNS_CD09='MedPar: PROX ICD-9-CM Diagnosis code IX';
+LABEL Prox_DGNS_CD10='MedPar: PROX ICD-9-CM Diagnosis code X';
+LABEL Prox_DGNS_CD11='MedPar: PROX ICD-9-CM Diagnosis code XI';
+LABEL Prox_DGNS_CD12='MedPar: PROX ICD-9-CM Diagnosis code XII';
+LABEL Prox_DGNS_CD13='MedPar: PROX ICD-9-CM Diagnosis code XIII';
+LABEL Prox_DGNS_CD14='MedPar: PROX ICD-9-CM Diagnosis code XIV';
+LABEL Prox_DGNS_CD15='MedPar: PROX ICD-9-CM Diagnosis code XV';
+LABEL Prox_DGNS_CD16='MedPar: PROX ICD-9-CM Diagnosis code XVI';
+LABEL Prox_DGNS_CD17='MedPar: PROX ICD-9-CM Diagnosis code XVII';
+LABEL Prox_DGNS_CD18='MedPar: PROX ICD-9-CM Diagnosis code XVIII';
+LABEL Prox_DGNS_CD19='MedPar: PROX ICD-9-CM Diagnosis code XIX';
+LABEL Prox_DGNS_CD20='MedPar: PROX ICD-9-CM Diagnosis code XX';
+LABEL Prox_DGNS_CD21='MedPar: PROX ICD-9-CM Diagnosis code XXI';
+LABEL Prox_DGNS_CD22='MedPar: PROX ICD-9-CM Diagnosis code XXII';
+LABEL Prox_DGNS_CD23='MedPar: PROX ICD-9-CM Diagnosis code XXIII';
+LABEL Prox_DGNS_CD24='MedPar: PROX ICD-9-CM Diagnosis code XXIV';
+LABEL Prox_DGNS_CD25='MedPar: PROX ICD-9-CM Diagnosis code XXV';
+LABEL Prox_DGNS_VRSN_CD_1='MedPar: PROX Version Code 01 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_10='MedPar: PROX Version Code 10 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_11='MedPar: PROX Version Code 11 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_12='MedPar: PROX Version Code 12 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_13='MedPar: PROX Version Code 13 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_14='MedPar: PROX Version Code 14 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_15='MedPar: PROX Version Code 15 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_16='MedPar: PROX Version Code 16 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_17='MedPar: PROX Version Code 17 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_18='MedPar: PROX Version Code 18 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_19='MedPar: PROX Version Code 19 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_2='MedPar: PROX Version Code 02 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_20='MedPar: PROX Version Code 20 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_21='MedPar: PROX Version Code 21 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_22='MedPar: PROX Version Code 22 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_23='MedPar: PROX Version Code 23 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_24='MedPar: PROX Version Code 24 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_25='MedPar: PROX Version Code 25 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_3='MedPar: PROX Version Code 03 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_4='MedPar: PROX Version Code 04 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_5='MedPar: PROX Version Code 05 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_6='MedPar: PROX Version Code 06 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_7='MedPar: PROX Version Code 07 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_8='MedPar: PROX Version Code 08 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL Prox_DGNS_VRSN_CD_9='MedPar: PROX Version Code 09 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL PROX_DSCHRG='MedPar: Inpatient discharge date of acute hospitalization';
+LABEL Prox_PRCDR_CD1='MedPar: Principal Procedure code';
+LABEL Prox_PRCDR_CD10='MedPar: Procedure Code X';
+LABEL Prox_PRCDR_CD11='MedPar: Procedure Code XI';
+LABEL Prox_PRCDR_CD12='MedPar: Procedure Code XII';
+LABEL Prox_PRCDR_CD13='MedPar: Procedure Code XIII';
+LABEL Prox_PRCDR_CD14='MedPar: Procedure Code XIV';
+LABEL Prox_PRCDR_CD15='MedPar: Procedure Code XV';
+LABEL Prox_PRCDR_CD16='MedPar: Procedure Code XVI';
+LABEL Prox_PRCDR_CD17='MedPar: Procedure Code XVII';
+LABEL Prox_PRCDR_CD18='MedPar: Procedure Code XVIII';
+LABEL Prox_PRCDR_CD19='MedPar: Procedure Code XIX';
+LABEL Prox_PRCDR_CD2='MedPar: Procedure Code II';
+LABEL Prox_PRCDR_CD20='MedPar: Procedure Code XX';
+LABEL Prox_PRCDR_CD21='MedPar: Procedure Code XXI';
+LABEL Prox_PRCDR_CD22='MedPar: Procedure Code XXII';
+LABEL Prox_PRCDR_CD23='MedPar: Procedure Code XXIII';
+LABEL Prox_PRCDR_CD24='MedPar: Procedure Code XXIV';
+LABEL Prox_PRCDR_CD25='MedPar: Procedure Code XXV';
+LABEL Prox_PRCDR_CD3='MedPar: Procedure Code III';
+LABEL Prox_PRCDR_CD4='MedPar: Procedure Code IV';
+LABEL Prox_PRCDR_CD5='MedPar: Procedure Code V';
+LABEL Prox_PRCDR_CD6='MedPar: Procedure Code VI';
+LABEL Prox_PRCDR_CD7='MedPar: Procedure Code VII';
+LABEL Prox_PRCDR_CD8='MedPar: Procedure Code VIII';
+LABEL Prox_PRCDR_CD9='MedPar: Procedure Code IX';
+LABEL Prox_PRCDRCNT='MedPar: Surgical procedure codes included in stay';
+LABEL Prox_PRVDR_NUM='MedPar: Proximal hospitalization CCN';
+LABEL SNF_ADM_YEAR='MedPar: Inpatient admission year of SNF stay';
+LABEL SNF_ADMSNDT='MedPar: Inpatient admission date of SNF stay';
+LABEL age_cnt='MedPar: Age at date of SNF admission';
+LABEL SNF_BENE_DSCHRG_STUS_CD='MedPar: Discharge status of the SNF stay';
+LABEL SNF_bene_mdcr_bnft_exhst_dt='MedPar: Exhaust date of Medicare benefit';
+LABEL DGNS_CD_CNT='MedPar: SNF Diagnosis codes included in stay';
+LABEL DGNS_CD01='MedPar: SNF Primary ICD-9-CM code';
+LABEL DGNS_CD02='MedPar: SNF ICD-9-CM Diagnosis code II';
+LABEL DGNS_CD03='MedPar: SNF ICD-9-CM Diagnosis code III';
+LABEL DGNS_CD04='MedPar: SNF ICD-9-CM Diagnosis code IV';
+LABEL DGNS_CD05='MedPar: SNF ICD-9-CM Diagnosis code V';
+LABEL DGNS_CD06='MedPar: SNF ICD-9-CM Diagnosis code VI';
+LABEL DGNS_CD07='MedPar: SNF ICD-9-CM Diagnosis code VII';
+LABEL DGNS_CD08='MedPar: SNF ICD-9-CM Diagnosis code VIII';
+LABEL DGNS_CD09='MedPar: SNF ICD-9-CM Diagnosis code IX';
+LABEL DGNS_CD10='MedPar: SNF ICD-9-CM Diagnosis code X';
+LABEL DGNS_CD11='MedPar: SNF ICD-9-CM Diagnosis code XI';
+LABEL DGNS_CD12='MedPar: SNF ICD-9-CM Diagnosis code XII';
+LABEL DGNS_CD13='MedPar: SNF ICD-9-CM Diagnosis code XIII';
+LABEL DGNS_CD14='MedPar: SNF ICD-9-CM Diagnosis code XIV';
+LABEL DGNS_CD15='MedPar: SNF ICD-9-CM Diagnosis code XV';
+LABEL DGNS_CD16='MedPar: SNF ICD-9-CM Diagnosis code XVI';
+LABEL DGNS_CD17='MedPar: SNF ICD-9-CM Diagnosis code XVII';
+LABEL DGNS_CD18='MedPar: SNF ICD-9-CM Diagnosis code XVIII';
+LABEL DGNS_CD19='MedPar: SNF ICD-9-CM Diagnosis code XIX';
+LABEL DGNS_CD20='MedPar: SNF ICD-9-CM Diagnosis code XX';
+LABEL DGNS_CD21='MedPar: SNF ICD-9-CM Diagnosis code XXI';
+LABEL DGNS_CD22='MedPar: SNF ICD-9-CM Diagnosis code XXII';
+LABEL DGNS_CD23='MedPar: SNF ICD-9-CM Diagnosis code XXIII';
+LABEL DGNS_CD24='MedPar: SNF ICD-9-CM Diagnosis code XXIV';
+LABEL DGNS_CD25='MedPar: SNF ICD-9-CM Diagnosis code XXV';
+LABEL DGNS_VRSN_CD_1='MedPar: SNF Version Code 01 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_2='MedPar: SNF Version Code 02 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_3='MedPar: SNF Version Code 03 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_4='MedPar: SNF Version Code 04 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_5='MedPar: SNF Version Code 05 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_6='MedPar: SNF Version Code 06 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_7='MedPar: SNF Version Code 07 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_8='MedPar: SNF Version Code 08 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_9='MedPar: SNF Version Code 09 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_10='MedPar: SNF Version Code 10 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_11='MedPar: SNF Version Code 11 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_12='MedPar: SNF Version Code 12 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_13='MedPar: SNF Version Code 13 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_14='MedPar: SNF Version Code 14 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_15='MedPar: SNF Version Code 15 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_16='MedPar: SNF Version Code 16 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_17='MedPar: SNF Version Code 17 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_18='MedPar: SNF Version Code 18 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_19='MedPar: SNF Version Code 19 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_20='MedPar: SNF Version Code 20 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_21='MedPar: SNF Version Code 21 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_22='MedPar: SNF Version Code 22 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_23='MedPar: SNF Version Code 23 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_24='MedPar: SNF Version Code 24 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DGNS_VRSN_CD_25='MedPar: SNF Version Code 25 - Indicate if diagnosis code is ICD-9 or ICD-10.';
+LABEL DRG_CD='MedPar: SNF DRG Code';
+LABEL SNF_DSCHRGDT='MedPar: Inpatient discharge date of SNF stay';
+LABEL SNF_DSTNTNCD='MedPar: Inpatient destination code of SNF stay';
+LABEL PRCDR_CD1='MedPar: SNF Principal Procedure code';
+LABEL PRCDR_CD10='MedPar: SNF Procedure Code X';
+LABEL PRCDR_CD11='MedPar: SNF Procedure Code XI';
+LABEL PRCDR_CD12='MedPar: SNF Procedure Code XII';
+LABEL PRCDR_CD13='MedPar: SNF Procedure Code XIII';
+LABEL PRCDR_CD14='MedPar: SNF Procedure Code XIV';
+LABEL PRCDR_CD15='MedPar: SNF Procedure Code XV';
+LABEL PRCDR_CD16='MedPar: SNF Procedure Code XVI';
+LABEL PRCDR_CD17='MedPar: SNF Procedure Code XVII';
+LABEL PRCDR_CD18='MedPar: SNF Procedure Code XVIII';
+LABEL PRCDR_CD19='MedPar: SNF Procedure Code XIX';
+LABEL PRCDR_CD2='MedPar: SNF Procedure Code II';
+LABEL PRCDR_CD20='MedPar: SNF Procedure Code XX';
+LABEL PRCDR_CD21='MedPar: SNF Procedure Code XXI';
+LABEL PRCDR_CD22='MedPar: SNF Procedure Code XXII';
+LABEL PRCDR_CD23='MedPar: SNF Procedure Code XXIII';
+LABEL PRCDR_CD24='MedPar: SNF Procedure Code XXIV';
+LABEL PRCDR_CD25='MedPar: SNF Procedure Code XXV';
+LABEL PRCDR_CD3='MedPar: SNF Procedure Code III';
+LABEL PRCDR_CD4='MedPar: SNF Procedure Code IV';
+LABEL PRCDR_CD5='MedPar: SNF Procedure Code V';
+LABEL PRCDR_CD6='MedPar: SNF Procedure Code VI';
+LABEL PRCDR_CD7='MedPar: SNF Procedure Code VII';
+LABEL PRCDR_CD8='MedPar: SNF Procedure Code VIII';
+LABEL PRCDR_CD9='MedPar: SNF Procedure Code IX';
+LABEL SNF_PRVDR_NUM='MedPar: SNF CCN';
+LABEL SRGCL_PRCDR_VRSN_CD='MedPar: Surgical Procedure Version Code (Earlier Version)';
+LABEL SRGCL_PRCDR_VRSN_CD_1='MedPar: Surgical Procedure Version Code 01';
+LABEL SRGCL_PRCDR_VRSN_CD_10='MedPar: Surgical Procedure Version Code 10';
+LABEL SRGCL_PRCDR_VRSN_CD_11='MedPar: Surgical Procedure Version Code 11';
+LABEL SRGCL_PRCDR_VRSN_CD_12='MedPar: Surgical Procedure Version Code 12';
+LABEL SRGCL_PRCDR_VRSN_CD_13='MedPar: Surgical Procedure Version Code 13';
+LABEL SRGCL_PRCDR_VRSN_CD_14='MedPar: Surgical Procedure Version Code 14';
+LABEL SRGCL_PRCDR_VRSN_CD_15='MedPar: Surgical Procedure Version Code 15';
+LABEL SRGCL_PRCDR_VRSN_CD_16='MedPar: Surgical Procedure Version Code 16';
+LABEL SRGCL_PRCDR_VRSN_CD_17='MedPar: Surgical Procedure Version Code 17';
+LABEL SRGCL_PRCDR_VRSN_CD_18='MedPar: Surgical Procedure Version Code 18';
+LABEL SRGCL_PRCDR_VRSN_CD_19='MedPar: Surgical Procedure Version Code 19';
+LABEL SRGCL_PRCDR_VRSN_CD_2='MedPar: Surgical Procedure Version Code 02';
+LABEL SRGCL_PRCDR_VRSN_CD_20='MedPar: Surgical Procedure Version Code 20';
+LABEL SRGCL_PRCDR_VRSN_CD_21='MedPar: Surgical Procedure Version Code 21';
+LABEL SRGCL_PRCDR_VRSN_CD_22='MedPar: Surgical Procedure Version Code 22';
+LABEL SRGCL_PRCDR_VRSN_CD_23='MedPar: Surgical Procedure Version Code 23';
+LABEL SRGCL_PRCDR_VRSN_CD_24='MedPar: Surgical Procedure Version Code 24';
+LABEL SRGCL_PRCDR_VRSN_CD_25='MedPar: Surgical Procedure Version Code 25';
+LABEL SRGCL_PRCDR_VRSN_CD_3='MedPar: Surgical Procedure Version Code 03';
+LABEL SRGCL_PRCDR_VRSN_CD_4='MedPar: Surgical Procedure Version Code 04';
+LABEL SRGCL_PRCDR_VRSN_CD_5='MedPar: Surgical Procedure Version Code 05';
+LABEL SRGCL_PRCDR_VRSN_CD_6='MedPar: Surgical Procedure Version Code 06';
+LABEL SRGCL_PRCDR_VRSN_CD_7='MedPar: Surgical Procedure Version Code 07';
+LABEL SRGCL_PRCDR_VRSN_CD_8='MedPar: Surgical Procedure Version Code 08';
+LABEL SRGCL_PRCDR_VRSN_CD_9='MedPar: Surgical Procedure Version Code 09';
+LABEL SPCLUNIT='MedPar: Special num system code for hosp units that are PPS/SNF SB dsgntn excl.';
+LABEL SSLSSNF='MedPar: Code indicating whether stay is short stay, long stay, or SNF';
+LABEL anyICUdays_rev='FOIA Derived: Flag for days in either an intensive care unit or a coronary care unit during the prior proximal stay';
+LABEL CAH_exclusion='FOIA Derived: SNF stays in a CAH';
+LABEL Coinciding_IRF_LTCH_Def2='FOIA Derived: if there is an IRF or LTCH stay within 30 days after the prior proximal hospital discharge';
+LABEL count90_PriorHospStays='FOIA Derived: The number of IPPS stays in the 90 days prior to the prior proximal hospital discharge';
+LABEL count90_PriorHospStays_cat='FOIA Derived: Categories for the number of IPPS stays in the 90 days prior to the prior proximal hospital discharge';
+LABEL covid_rf='FOIA Derived: 1 if prox_covid=1; 2 if prox_covid=0 and hist_covid=1; 3 if prox_covid=0 and hist_covid=0';
+LABEL CRNRY_CARE_DAY_CNT='FOIA Derived: Coronary care days used by beneficiary for stay';
+LABEL daysBtwnPriorProx_Readmit='FOIA Derived: The gap between the prior proximal hospital discharge date and the readmission admission date';
+LABEL DSC_E='FOIA Derived: Corrected imputed discharge date (created in SNFRM_01)';
+LABEL DSCWasMissing='FOIA Derived: Flag for missing discharge date (created in SNFRM_01)';
+LABEL EMBEDDED_FLAG='FOIA Derived: Flag for an embedded stay (created in SNFRM_01)';
+LABEL Exclude_already_dead_medpar='FOIA Derived: SNF stays where the beneficiary has already died';
+LABEL Exclude_DI_DPI_Def2='FOIA Derived: SNF stays with an intervening IRF or LTCH stay or a POST SNF PAC stay';
+LABEL exclude_embedded='FOIA Derived: SNF stays that are embedded';
+LABEL exclude_FedHospTransfer='FOIA Derived: SNF stays where the beneficiary was transferred to a federal hospital from SNF';
+LABEL exclude_nonUS='FOIA Derived: SNF stays where care is received outside the US';
+LABEL exclude_nopay='FOIA Derived: SNF stays where Medicare payment amount is less than 1';
+LABEL exclude_NoPriorHosp='FOIA Derived: SNF stays with no prior proximal hospital stay or an admission date before the discharge date of the prior proximal hospital stay';
+LABEL exclude_ProxUtlztnDays0='FOIA Derived: SNF stays where the prior proximal hospital stay has a utilization day count of zero';
+LABEL exclude_SNF_AMA='FOIA Derived: SNF stays where the beneficiary was discharged against medical advice.';
+LABEL exclude_SNF_utlznDays0='FOIA Derived: SNF stays with a utilization day count of zero';
+LABEL Exclude_unreliable_demog_info='FOIA Derived: SNF stays where the beneficiary has unreliable demographic information';
+LABEL GAP='FOIA Derived: The gap between hospital discharge date and SNF admission date';
+LABEL hist_covid='FOIA Derived: ';
+LABEL INDEX_SNF_ADM_ID='FOIA Derived: Unique ID for each index SNF admission';
+LABEL _IPPS_Psych_FLAG='FOIA Derived: has an IPPS or Psych flag after prior proximal SNF';
+LABEL los1_3='FOIA Derived: SNF stays with a prior proximal hospital stay with a length in a given range';
+LABEL los14_GT='FOIA Derived: SNF stays with a prior proximal hospital stay with a length in a given range';
+LABEL los15_GT='FOIA Derived: means same as los14_GT and will be phased out';
+LABEL los4_7='FOIA Derived: SNF stays with a prior proximal hospital stay with a length in a given range';
+LABEL los8_14='FOIA Derived: SNF stays with a prior proximal hospital stay with a length in a given range';
+LABEL LTST_CLM_ACRTN_DT='FOIA Derived: Date latest claim incl in stay accreted to bene mstr rec at the CWF host';
+LABEL m0_34='FOIA Derived: Male age LT 35';
+LABEL m35_44='FOIA Derived: Male age 35_44';
+LABEL m45_54='FOIA Derived: Male age 45_54';
+LABEL m55_59='FOIA Derived: Male age 55_59';
+LABEL m60_64='FOIA Derived: Male age 60_64';
+LABEL m65_69='FOIA Derived: Male age 65_69';
+LABEL m70_74='FOIA Derived: Male age 70_74';
+LABEL m75_79='FOIA Derived: Male age 75_79';
+LABEL m80_84='FOIA Derived: Male age 80_84';
+LABEL m85_89='FOIA Derived: Male age 85_89';
+LABEL m90_94='FOIA Derived: Male age 90_94';
+LABEL m95_GT='FOIA Derived: Male age GT 95';
+LABEL MultipleSNFs='FOIA Derived: SNF stays with another SNF stay with the same HICNO in the same timeframe';
+LABEL _MultipleSNFs_CNT='FOIA Derived: Count of SNF stays with another SNF stay with the same HICNO in the same timeframe';
+LABEL Prior_0_covid='FOIA Derived: Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range';
+LABEL Prior_1_3_covid='FOIA Derived: Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range';
+LABEL Prior_4_6_covid='FOIA Derived: Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range';
+LABEL Prior_7_9_covid='FOIA Derived: Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range';
+LABEL Prior_GE_10_covid='FOIA Derived: Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range';
+LABEL PRIOR_PROXIMAL_STAY='FOIA Derived: SNF stays with a prior proximal hospital stay';
+LABEL prox_covid='FOIA Derived: value of U07.1 in nay field for PROX_DGNS_CD1 through PROX_DGNS_CD25';
+LABEL Prox_crnry_care='FOIA Derived: Flag for days in a coronary care unit during the prior proximal stay';
+LABEL Prox_CRNRY_CARE_DAY_CNT='FOIA Derived: Coronary care days used by beneficiary for stay';
+LABEL Prox_DGNS_CD_CNT='FOIA Derived: Diagnosis codes included in stay';
+LABEL Prox_DSCHRGDT='FOIA Derived: Imputed discharge date';
+LABEL Prox_ICARECNT='FOIA Derived: Intensive care days used by beneficiary for stay';
+LABEL Prox_Intnsv_care='FOIA Derived: Flag for days in an intensive care unit during the prior proximal stay';
+LABEL Prox_LOS_cat='FOIA Derived: The length of the prior proximal hospital stay by category.';
+LABEL Prox_LOSCNT='FOIA Derived: Days of beneficiarys stay in a hospital/SNF';
+LABEL Prox_Prov_type='FOIA Derived: Provider type';
+LABEL Prox_UTLZTN_DAY_CNT='FOIA Derived: Covered days of care chargeable to Medicare utilization for stay';
+LABEL ProxHospDischgDate_GT1='FOIA Derived: SNF stays with an admission date before the discharge date of the prior proximal hospital stay';
+LABEL PRVDR_STATE_CD='FOIA Derived: SSA standard state code of a beneficiarys residence.';
+LABEL READM_ADMSN='FOIA Derived: Readmission stay admission date';
+LABEL READM_DGNS_CD1='FOIA Derived: Readmission principal diagnosis';
+LABEL READM_DGNS_CD10='FOIA Derived: ';
+LABEL READM_DGNS_CD11='FOIA Derived: ';
+LABEL READM_DGNS_CD12='FOIA Derived: ';
+LABEL READM_DGNS_CD13='FOIA Derived: ';
+LABEL READM_DGNS_CD14='FOIA Derived: ';
+LABEL READM_DGNS_CD15='FOIA Derived: ';
+LABEL READM_DGNS_CD16='FOIA Derived: ';
+LABEL READM_DGNS_CD17='FOIA Derived: ';
+LABEL READM_DGNS_CD18='FOIA Derived: ';
+LABEL READM_DGNS_CD19='FOIA Derived: ';
+LABEL READM_DGNS_CD2='FOIA Derived: ';
+LABEL READM_DGNS_CD20='FOIA Derived: ';
+LABEL READM_DGNS_CD21='FOIA Derived: ';
+LABEL READM_DGNS_CD22='FOIA Derived: ';
+LABEL READM_DGNS_CD23='FOIA Derived: ';
+LABEL READM_DGNS_CD24='FOIA Derived: ';
+LABEL READM_DGNS_CD25='FOIA Derived: ';
+LABEL READM_DGNS_CD3='FOIA Derived: ';
+LABEL READM_DGNS_CD4='FOIA Derived: ';
+LABEL READM_DGNS_CD5='FOIA Derived: ';
+LABEL READM_DGNS_CD6='FOIA Derived: ';
+LABEL READM_DGNS_CD7='FOIA Derived: ';
+LABEL READM_DGNS_CD8='FOIA Derived: ';
+LABEL READM_DGNS_CD9='FOIA Derived: ';
+LABEL READM_DSCHRG='FOIA Derived: Readmission stay discharge date';
+LABEL READM_PRCDR_CD1='FOIA Derived: Readmission procedure code1-25';
+LABEL READM_PRCDR_CD10='FOIA Derived: ';
+LABEL READM_PRCDR_CD11='FOIA Derived: ';
+LABEL READM_PRCDR_CD12='FOIA Derived: ';
+LABEL READM_PRCDR_CD13='FOIA Derived: ';
+LABEL READM_PRCDR_CD14='FOIA Derived: ';
+LABEL READM_PRCDR_CD15='FOIA Derived: ';
+LABEL READM_PRCDR_CD16='FOIA Derived: ';
+LABEL READM_PRCDR_CD17='FOIA Derived: ';
+LABEL READM_PRCDR_CD18='FOIA Derived: ';
+LABEL READM_PRCDR_CD19='FOIA Derived: ';
+LABEL READM_PRCDR_CD2='FOIA Derived: ';
+LABEL READM_PRCDR_CD20='FOIA Derived: ';
+LABEL READM_PRCDR_CD21='FOIA Derived: ';
+LABEL READM_PRCDR_CD22='FOIA Derived: ';
+LABEL READM_PRCDR_CD23='FOIA Derived: ';
+LABEL READM_PRCDR_CD24='FOIA Derived: ';
+LABEL READM_PRCDR_CD25='FOIA Derived: ';
+LABEL READM_PRCDR_CD3='FOIA Derived: ';
+LABEL READM_PRCDR_CD4='FOIA Derived: ';
+LABEL READM_PRCDR_CD5='FOIA Derived: ';
+LABEL READM_PRCDR_CD6='FOIA Derived: ';
+LABEL READM_PRCDR_CD7='FOIA Derived: ';
+LABEL READM_PRCDR_CD8='FOIA Derived: ';
+LABEL READM_PRCDR_CD9='FOIA Derived: ';
+LABEL READM_prvdr_num='FOIA Derived: Readmission prvdr_numCCN';
+LABEL readmission_type='FOIA Derived: The prvdr_numtype of the readmission';
+LABEL readmit_ipps2='FOIA Derived: Flag for IPPS/Psych stay within 30 days of the prior proximal hospital discharge';
+LABEL SNF_DSC='FOIA Derived: Imputed discharge date (created in SNFRM_01)';
+LABEL SNF_LOSCNT='FOIA Derived: Length of stay of the SNF stay';
+LABEL SNF_MDCR_PMT_AMT='FOIA Derived: Medicare payment amount for the SNF stay';
+LABEL SNF_UTLZTN_DAY_CNT='FOIA Derived: Count of utilization days in the SNF stay';
+LABEL w0_34='FOIA Derived: Female age LT 35';
+LABEL w35_44='FOIA Derived: Female age 35_44';
+LABEL w45_54='FOIA Derived: Female age 45_54';
+LABEL w55_59='FOIA Derived: Female age 55_59';
+LABEL w60_64='FOIA Derived: Female age 60_64';
+LABEL w65_69='FOIA Derived: Female age 65_69';
+LABEL w70_74='FOIA Derived: Female age 70_74';
+LABEL w75_79='FOIA Derived: Female age 75_79';
+LABEL w80_84='FOIA Derived: Female age 80_84';
+LABEL w85_89='FOIA Derived: Female age 85_89';
+LABEL w90_94='FOIA Derived: Female age 90_94';
+LABEL w95_GT='FOIA Derived: Female age GT 95';
+label readmit_30SNF_ipps_up='Readmission flag within 30 days of snf discharge';
+RUN;
+
+DATA FOIADATA.FOIA_W_MBSF_11_21; 
+RETAIN BENE_ID	MedPARRecordNumber	TIME_PERIOD	Bene_ZIP	CNTY_CD	cov_admsn	cov_all	cov_check	CREC	DEATH_DT	dual_all	dual_check	ESRD	ESRD_IND	fips_cd	MS_CD	OREC	RTI_RACE_CD	sex	STATE_CD		BENE_IDENT_CD	BENE_RSDNC_SSA_CNTY_CD	BENE_SEX_CD	CLM_TYPE	DEATHCD	DEATHDT	ICARECNT	ICUINDCD	SNF_ORG_NPI_NUM	SNF_PRCDRCNT	SNF_PRCDRSW	PROX_ADM_YEAR	Prox_admsndt	Prox_AGE_CNT	Prox_DGNS_CD01	Prox_DGNS_CD02	Prox_DGNS_CD03	Prox_DGNS_CD04	Prox_DGNS_CD05	Prox_DGNS_CD06	Prox_DGNS_CD07	Prox_DGNS_CD08	Prox_DGNS_CD09	Prox_DGNS_CD10	Prox_DGNS_CD11	Prox_DGNS_CD12	Prox_DGNS_CD13	Prox_DGNS_CD14	Prox_DGNS_CD15	Prox_DGNS_CD16	Prox_DGNS_CD17	Prox_DGNS_CD18	Prox_DGNS_CD19	Prox_DGNS_CD20	Prox_DGNS_CD21	Prox_DGNS_CD22	Prox_DGNS_CD23	Prox_DGNS_CD24	Prox_DGNS_CD25	Prox_DGNS_VRSN_CD_1	Prox_DGNS_VRSN_CD_10	Prox_DGNS_VRSN_CD_11	Prox_DGNS_VRSN_CD_12	Prox_DGNS_VRSN_CD_13	Prox_DGNS_VRSN_CD_14	Prox_DGNS_VRSN_CD_15	Prox_DGNS_VRSN_CD_16	Prox_DGNS_VRSN_CD_17	Prox_DGNS_VRSN_CD_18	Prox_DGNS_VRSN_CD_19	Prox_DGNS_VRSN_CD_2	Prox_DGNS_VRSN_CD_20	Prox_DGNS_VRSN_CD_21	Prox_DGNS_VRSN_CD_22	Prox_DGNS_VRSN_CD_23	Prox_DGNS_VRSN_CD_24	Prox_DGNS_VRSN_CD_25	Prox_DGNS_VRSN_CD_3	Prox_DGNS_VRSN_CD_4	Prox_DGNS_VRSN_CD_5	Prox_DGNS_VRSN_CD_6	Prox_DGNS_VRSN_CD_7	Prox_DGNS_VRSN_CD_8	Prox_DGNS_VRSN_CD_9	PROX_DSCHRG	Prox_PRCDR_CD1-Prox_PRCDR_CD25	PROX_SRGCL_PRCDR_VRSN_CD_1-PROX_SRGCL_PRCDR_VRSN_CD_25 Prox_PRCDRCNT	Prox_PRVDR_NUM	SNF_ADM_YEAR	SNF_ADMSNDT	snf_age_cnt	SNF_BENE_DSCHRG_STUS_CD	SNF_bene_mdcr_bnft_exhst_dt	SNF_DGNS_CD_CNT	SNF_DGNS_CD01	SNF_DGNS_CD02	SNF_DGNS_CD03	SNF_DGNS_CD04	SNF_DGNS_CD05	SNF_DGNS_CD06	SNF_DGNS_CD07	SNF_DGNS_CD08	SNF_DGNS_CD09	SNF_DGNS_CD10	SNF_DGNS_CD11	SNF_DGNS_CD12	SNF_DGNS_CD13	SNF_DGNS_CD14	SNF_DGNS_CD15	SNF_DGNS_CD16	SNF_DGNS_CD17	SNF_DGNS_CD18	SNF_DGNS_CD19	SNF_DGNS_CD20	SNF_DGNS_CD21	SNF_DGNS_CD22	SNF_DGNS_CD23	SNF_DGNS_CD24	SNF_DGNS_CD25	SNF_DGNS_VRSN_CD_01	SNF_DGNS_VRSN_CD_02	SNF_DGNS_VRSN_CD_03	SNF_DGNS_VRSN_CD_04	SNF_DGNS_VRSN_CD_05	SNF_DGNS_VRSN_CD_06	SNF_DGNS_VRSN_CD_07	SNF_DGNS_VRSN_CD_08	SNF_DGNS_VRSN_CD_09	SNF_DGNS_VRSN_CD_10	SNF_DGNS_VRSN_CD_11	SNF_DGNS_VRSN_CD_12	SNF_DGNS_VRSN_CD_13	SNF_DGNS_VRSN_CD_14	SNF_DGNS_VRSN_CD_15	SNF_DGNS_VRSN_CD_16	SNF_DGNS_VRSN_CD_17	SNF_DGNS_VRSN_CD_18	SNF_DGNS_VRSN_CD_19	SNF_DGNS_VRSN_CD_20	SNF_DGNS_VRSN_CD_21	SNF_DGNS_VRSN_CD_22	SNF_DGNS_VRSN_CD_23	SNF_DGNS_VRSN_CD_24	SNF_DGNS_VRSN_CD_25	SNF_DRG_CD	SNF_DSCHRGDT	SNF_DSTNTNCD	SNF_PRCDR_CD1	SNF_PRCDR_CD10	SNF_PRCDR_CD11	SNF_PRCDR_CD12	SNF_PRCDR_CD13	SNF_PRCDR_CD14	SNF_PRCDR_CD15	SNF_PRCDR_CD16	SNF_PRCDR_CD17	SNF_PRCDR_CD18	SNF_PRCDR_CD19	SNF_PRCDR_CD2	SNF_PRCDR_CD20	SNF_PRCDR_CD21	SNF_PRCDR_CD22	SNF_PRCDR_CD23	SNF_PRCDR_CD24	SNF_PRCDR_CD25	SNF_PRCDR_CD3	SNF_PRCDR_CD4	SNF_PRCDR_CD5	SNF_PRCDR_CD6	SNF_PRCDR_CD7	SNF_PRCDR_CD8	SNF_PRCDR_CD9	SNF_PRVDR_NUM	SNF_SRGCL_PRCDR_VRSN_CD	SNF_SRGCL_PRCDR_VRSN_CD_1	SNF_SRGCL_PRCDR_VRSN_CD_10	SNF_SRGCL_PRCDR_VRSN_CD_11	SNF_SRGCL_PRCDR_VRSN_CD_12	SNF_SRGCL_PRCDR_VRSN_CD_13	SNF_SRGCL_PRCDR_VRSN_CD_14	SNF_SRGCL_PRCDR_VRSN_CD_15	SNF_SRGCL_PRCDR_VRSN_CD_16	SNF_SRGCL_PRCDR_VRSN_CD_17	SNF_SRGCL_PRCDR_VRSN_CD_18	SNF_SRGCL_PRCDR_VRSN_CD_19	SNF_SRGCL_PRCDR_VRSN_CD_2	SNF_SRGCL_PRCDR_VRSN_CD_20	SNF_SRGCL_PRCDR_VRSN_CD_21	SNF_SRGCL_PRCDR_VRSN_CD_22	SNF_SRGCL_PRCDR_VRSN_CD_23	SNF_SRGCL_PRCDR_VRSN_CD_24	SNF_SRGCL_PRCDR_VRSN_CD_25	SNF_SRGCL_PRCDR_VRSN_CD_3	SNF_SRGCL_PRCDR_VRSN_CD_4	SNF_SRGCL_PRCDR_VRSN_CD_5	SNF_SRGCL_PRCDR_VRSN_CD_6	SNF_SRGCL_PRCDR_VRSN_CD_7	SNF_SRGCL_PRCDR_VRSN_CD_8	SNF_SRGCL_PRCDR_VRSN_CD_9	SPCLUNIT	SSLSSNF	anyICUdays_rev	CAH_exclusion	Coinciding_IRF_LTCH_Def2	count90_PriorHospStays	count90_PriorHospStays_cat	covid_rf	CRNRY_CARE_DAY_CNT	daysBtwnPriorProx_Readmit	DSC_E	DSCWasMissing	EMBEDDED_FLAG	Exclude_already_dead_medpar	Exclude_DI_DPI_Def2	exclude_embedded	exclude_FedHospTransfer	exclude_nonUS	exclude_nopay	exclude_NoPriorHosp	exclude_ProxUtlztnDays0	exclude_SNF_AMA	exclude_SNF_utlznDays0	Exclude_unreliable_demog_info	GAP	hist_covid	INDEX_SNF_ADM_ID	IPPS_Psych_FLAG	los1_3	los14_GT	los15_GT	los4_7	los8_14	LTST_CLM_ACRTN_DT	m0_34	m35_44	m45_54	m55_59	m60_64	m65_69	m70_74	m75_79	m80_84	m85_89	m90_94	m95_GT	MultipleSNFs	MultipleSNFs_CNT	Prior_0	Prior_1_3	Prior_4_6	Prior_7_9	Prior_GE_10	PRIOR_PROXIMAL_STAY		prox_covid	Prox_crnry_care	Prox_CRNRY_CARE_DAY_CNT	Prox_DGNS_CD_CNT	Prox_DSCHRGDT	Prox_ICARECNT	Prox_Intnsv_care	Prox_LOS_cat	Prox_LOSCNT	Prox_Prov_type	Prox_UTLZTN_DAY_CNT	ProxHospDischgDate_GT1	PRVDR_STATE_CD	READM_ADMSN	READM_DGNS_CD1	READM_DGNS_CD10	READM_DGNS_CD11	READM_DGNS_CD12	READM_DGNS_CD13	READM_DGNS_CD14	READM_DGNS_CD15	READM_DGNS_CD16	READM_DGNS_CD17	READM_DGNS_CD18	READM_DGNS_CD19	READM_DGNS_CD2	READM_DGNS_CD20	READM_DGNS_CD21	READM_DGNS_CD22	READM_DGNS_CD23	READM_DGNS_CD24	READM_DGNS_CD25	READM_DGNS_CD3	READM_DGNS_CD4	READM_DGNS_CD5	READM_DGNS_CD6	READM_DGNS_CD7	READM_DGNS_CD8	READM_DGNS_CD9	READM_DSCHRG	READM_PRCDR_CD1	READM_PRCDR_CD10	READM_PRCDR_CD11	READM_PRCDR_CD12	READM_PRCDR_CD13	READM_PRCDR_CD14	READM_PRCDR_CD15	READM_PRCDR_CD16	READM_PRCDR_CD17	READM_PRCDR_CD18	READM_PRCDR_CD19	READM_PRCDR_CD2	READM_PRCDR_CD20	READM_PRCDR_CD21	READM_PRCDR_CD22	READM_PRCDR_CD23	READM_PRCDR_CD24	READM_PRCDR_CD25	READM_PRCDR_CD3	READM_PRCDR_CD4	READM_PRCDR_CD5	READM_PRCDR_CD6	READM_PRCDR_CD7	READM_PRCDR_CD8	READM_PRCDR_CD9	READM_prvdr_num	readmission_type	readmit_ipps2	SNF_DSC	SNF_LOSCNT	SNF_MDCR_PMT_AMT	SNF_UTLZTN_DAY_CNT	w0_34	w35_44	w45_54	w55_59	w60_64	w65_69	w70_74	w75_79	w80_84	w85_89	w90_94	w95_GT;
+SET ALL_VISITS4;
+IF PROX_DGNS_CD01='' OR PROX_DGNS_VRSN_CD_1='' OR SNF_PRVDR_NUM='' OR Prox_AGE_CNT=. OR SEX='' OR ESRD='' OR OREC='' OR Prox_LOSCNT=. OR Prox_ICARECNT=.
+	OR Prox_admsndt=. OR Prox_DSCHRGDT=. OR Prox_admsndt=. OR Prox_DSCHRGDT=. OR SNF_ADMSNDT=. OR SNF_DSC=. 
+	THEN DELETE;
+RUN;
+
+
+
