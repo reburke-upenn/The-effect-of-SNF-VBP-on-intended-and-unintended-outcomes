@@ -1,0 +1,230 @@
+*****************************************************************************************************************************************
+*  Project Name :           SNF DID Analysis				 																			*
+*  Principal Investigator : Burke																										*
+*  Name of Program :        0c_MBSF_2020_2021.sas																						*
+*  Programmer :             J Heintz 02/20/2024     
+*  Proofread :				F Hutchins 8/5/24                                                            								*
+*  Program Description :	Pull MBSF beneficiary data from 2020-2021 to identify 
+							Medicare coverage type by month	(includes 12-month lookback)														*
+
+This program applies logic published under the Skilled Nursing Facility 
+Value-Based Purchasing (SNF VBP) Program. See:
+https://www.cms.gov/medicare/quality/nursing-home-improvement/value-based-purchasing/measures
+
+Specific code files were provided by CMS via the following Freedom of Information Act (FOIA) request: 
+
+Control/ID Number: 042320237001
+Request Submitted to CMS: 04/26/2023
+Records Released: 02/26/2024
+Subject: Risk-Standardized Readmissions Rates
+Submitting organization: University of Pennsylvania
+
+This program is adapted to use MBSF beneficiary data in place of EDB files.
+*****************************************************************************************************************************************;
+
+
+*Run library locations;
+%include '[filepath to code writing library locations]';
+
+*************************************************
+***STEP 1. Bring in Beneficiary Coverage Type (DENOM / MBSF)***
+*Note: pull 1 year prior for coverage type lookback;
+*************************************************;
+proc sql noprint;
+create table BENE_2019 as 
+select *, 2019 as year_w, RTI_RACE_CD as RTI_RACE_2019  
+from bene.dn100mod_2019
+(keep= bene_id rfrnc_yr RTI_RACE_CD COVSTART OREC ESRD_IND 
+STATE_CNTY_FIPS_CD_01-STATE_CNTY_FIPS_CD_12 bene_dob sex race
+HMOIND01-HMOIND12 BUYIN01 -BUYIN12 MDCR_STATUS_CODE_01-MDCR_STATUS_CODE_12 
+DEATH_DT PTC_PLAN_TYPE_CD_01-PTC_PLAN_TYPE_CD_12 
+DUAL_STUS_CD_01-DUAL_STUS_CD_12 V_DOD_SW) 
+;
+create table BENE_2020 as 
+select bene_id,	BENE_ENROLLMT_REF_YR AS rfrnc_yr,	RTI_RACE_CD,	COVSTART,	ENTLMT_RSN_ORIG AS OREC,	ESRD_IND,	STATE_CNTY_FIPS_CD_01,	STATE_CNTY_FIPS_CD_02,	STATE_CNTY_FIPS_CD_03,	STATE_CNTY_FIPS_CD_04,	STATE_CNTY_FIPS_CD_05,	STATE_CNTY_FIPS_CD_06,	STATE_CNTY_FIPS_CD_07,	STATE_CNTY_FIPS_CD_08,	STATE_CNTY_FIPS_CD_09,	STATE_CNTY_FIPS_CD_10,	STATE_CNTY_FIPS_CD_11,	STATE_CNTY_FIPS_CD_12,	BENE_BIRTH_DT AS bene_dob,	SEX_IDENT_CD AS sex,	HMO_IND_01 AS HMOIND01,	HMO_IND_02 AS HMOIND02,	HMO_IND_03 AS HMOIND03,	HMO_IND_04 AS HMOIND04,	HMO_IND_05 AS HMOIND05,	HMO_IND_06 AS HMOIND06,	HMO_IND_07 AS HMOIND07,	HMO_IND_08 AS HMOIND08,	HMO_IND_09 AS HMOIND09,	HMO_IND_10 AS HMOIND10,	HMO_IND_11 AS HMOIND11,	HMO_IND_12 AS HMOIND12,	MDCR_ENTLMT_BUYIN_IND_01 AS BUYIN01,	MDCR_ENTLMT_BUYIN_IND_02 AS BUYIN02,	MDCR_ENTLMT_BUYIN_IND_03 AS BUYIN03,	MDCR_ENTLMT_BUYIN_IND_04 AS BUYIN04,	MDCR_ENTLMT_BUYIN_IND_05 AS BUYIN05,	MDCR_ENTLMT_BUYIN_IND_06 AS BUYIN06,	MDCR_ENTLMT_BUYIN_IND_07 AS BUYIN07,	MDCR_ENTLMT_BUYIN_IND_08 AS BUYIN08,	MDCR_ENTLMT_BUYIN_IND_09 AS BUYIN09,	MDCR_ENTLMT_BUYIN_IND_10 AS BUYIN10,	MDCR_ENTLMT_BUYIN_IND_11 AS BUYIN11,	MDCR_ENTLMT_BUYIN_IND_12 AS BUYIN12,	MDCR_STATUS_CODE_01,	MDCR_STATUS_CODE_02,	MDCR_STATUS_CODE_03,	MDCR_STATUS_CODE_04,	MDCR_STATUS_CODE_05,	MDCR_STATUS_CODE_06,	MDCR_STATUS_CODE_07,	MDCR_STATUS_CODE_08,	MDCR_STATUS_CODE_09,	MDCR_STATUS_CODE_10,	MDCR_STATUS_CODE_11,	MDCR_STATUS_CODE_12,	BENE_DEATH_DT AS DEATH_DT,	PTC_PLAN_TYPE_CD_01,	PTC_PLAN_TYPE_CD_02,	PTC_PLAN_TYPE_CD_03,	PTC_PLAN_TYPE_CD_04,	PTC_PLAN_TYPE_CD_05,	PTC_PLAN_TYPE_CD_06,	PTC_PLAN_TYPE_CD_07,	PTC_PLAN_TYPE_CD_08,	PTC_PLAN_TYPE_CD_09,	PTC_PLAN_TYPE_CD_10,	PTC_PLAN_TYPE_CD_11,	PTC_PLAN_TYPE_CD_12,	DUAL_STUS_CD_01,	DUAL_STUS_CD_02,	DUAL_STUS_CD_03,	DUAL_STUS_CD_04,	DUAL_STUS_CD_05,	DUAL_STUS_CD_06,	DUAL_STUS_CD_07,	DUAL_STUS_CD_08,	DUAL_STUS_CD_09,	DUAL_STUS_CD_10,	DUAL_STUS_CD_11,	DUAL_STUS_CD_12,	VALID_DEATH_DT_SW AS V_DOD_SW,
+2020 as year_w, RTI_RACE_CD as RTI_RACE_2020  
+from bene.MBSF_ABCD_SUMMARY_2020
+(keep=bene_id	BENE_ENROLLMT_REF_YR	RTI_RACE_CD	COVSTART	ENTLMT_RSN_ORIG	ESRD_IND	STATE_CNTY_FIPS_CD_01	STATE_CNTY_FIPS_CD_02	STATE_CNTY_FIPS_CD_03	STATE_CNTY_FIPS_CD_04	STATE_CNTY_FIPS_CD_05	STATE_CNTY_FIPS_CD_06	STATE_CNTY_FIPS_CD_07	STATE_CNTY_FIPS_CD_08	STATE_CNTY_FIPS_CD_09	STATE_CNTY_FIPS_CD_10	STATE_CNTY_FIPS_CD_11	STATE_CNTY_FIPS_CD_12		BENE_BIRTH_DT	SEX_IDENT_CD	HMO_IND_01	HMO_IND_02	HMO_IND_03	HMO_IND_04	HMO_IND_05	HMO_IND_06	HMO_IND_07	HMO_IND_08	HMO_IND_09	HMO_IND_10	HMO_IND_11	HMO_IND_12	MDCR_ENTLMT_BUYIN_IND_01	MDCR_ENTLMT_BUYIN_IND_02	MDCR_ENTLMT_BUYIN_IND_03	MDCR_ENTLMT_BUYIN_IND_04	MDCR_ENTLMT_BUYIN_IND_05	MDCR_ENTLMT_BUYIN_IND_06	MDCR_ENTLMT_BUYIN_IND_07	MDCR_ENTLMT_BUYIN_IND_08	MDCR_ENTLMT_BUYIN_IND_09	MDCR_ENTLMT_BUYIN_IND_10	MDCR_ENTLMT_BUYIN_IND_11	MDCR_ENTLMT_BUYIN_IND_12	MDCR_STATUS_CODE_01	MDCR_STATUS_CODE_02	MDCR_STATUS_CODE_03	MDCR_STATUS_CODE_04	MDCR_STATUS_CODE_05	MDCR_STATUS_CODE_06	MDCR_STATUS_CODE_07	MDCR_STATUS_CODE_08	MDCR_STATUS_CODE_09	MDCR_STATUS_CODE_10	MDCR_STATUS_CODE_11	MDCR_STATUS_CODE_12	BENE_DEATH_DT	PTC_PLAN_TYPE_CD_01	PTC_PLAN_TYPE_CD_02	PTC_PLAN_TYPE_CD_03	PTC_PLAN_TYPE_CD_04	PTC_PLAN_TYPE_CD_05	PTC_PLAN_TYPE_CD_06	PTC_PLAN_TYPE_CD_07	PTC_PLAN_TYPE_CD_08	PTC_PLAN_TYPE_CD_09	PTC_PLAN_TYPE_CD_10	PTC_PLAN_TYPE_CD_11	PTC_PLAN_TYPE_CD_12	DUAL_STUS_CD_01	DUAL_STUS_CD_02	DUAL_STUS_CD_03	DUAL_STUS_CD_04	DUAL_STUS_CD_05	DUAL_STUS_CD_06	DUAL_STUS_CD_07	DUAL_STUS_CD_08	DUAL_STUS_CD_09	DUAL_STUS_CD_10	DUAL_STUS_CD_11	DUAL_STUS_CD_12 VALID_DEATH_DT_SW
+)
+;
+create table BENE_2021 as 
+select bene_id,	BENE_ENROLLMT_REF_YR AS rfrnc_yr,	RTI_RACE_CD,	COVSTART,	ENTLMT_RSN_ORIG AS OREC,	ESRD_IND,	STATE_CNTY_FIPS_CD_01,	STATE_CNTY_FIPS_CD_02,	STATE_CNTY_FIPS_CD_03,	STATE_CNTY_FIPS_CD_04,	STATE_CNTY_FIPS_CD_05,	STATE_CNTY_FIPS_CD_06,	STATE_CNTY_FIPS_CD_07,	STATE_CNTY_FIPS_CD_08,	STATE_CNTY_FIPS_CD_09,	STATE_CNTY_FIPS_CD_10,	STATE_CNTY_FIPS_CD_11,	STATE_CNTY_FIPS_CD_12,	BENE_BIRTH_DT AS bene_dob,	SEX_IDENT_CD AS sex,	HMO_IND_01 AS HMOIND01,	HMO_IND_02 AS HMOIND02,	HMO_IND_03 AS HMOIND03,	HMO_IND_04 AS HMOIND04,	HMO_IND_05 AS HMOIND05,	HMO_IND_06 AS HMOIND06,	HMO_IND_07 AS HMOIND07,	HMO_IND_08 AS HMOIND08,	HMO_IND_09 AS HMOIND09,	HMO_IND_10 AS HMOIND10,	HMO_IND_11 AS HMOIND11,	HMO_IND_12 AS HMOIND12,	MDCR_ENTLMT_BUYIN_IND_01 AS BUYIN01,	MDCR_ENTLMT_BUYIN_IND_02 AS BUYIN02,	MDCR_ENTLMT_BUYIN_IND_03 AS BUYIN03,	MDCR_ENTLMT_BUYIN_IND_04 AS BUYIN04,	MDCR_ENTLMT_BUYIN_IND_05 AS BUYIN05,	MDCR_ENTLMT_BUYIN_IND_06 AS BUYIN06,	MDCR_ENTLMT_BUYIN_IND_07 AS BUYIN07,	MDCR_ENTLMT_BUYIN_IND_08 AS BUYIN08,	MDCR_ENTLMT_BUYIN_IND_09 AS BUYIN09,	MDCR_ENTLMT_BUYIN_IND_10 AS BUYIN10,	MDCR_ENTLMT_BUYIN_IND_11 AS BUYIN11,	MDCR_ENTLMT_BUYIN_IND_12 AS BUYIN12,	MDCR_STATUS_CODE_01,	MDCR_STATUS_CODE_02,	MDCR_STATUS_CODE_03,	MDCR_STATUS_CODE_04,	MDCR_STATUS_CODE_05,	MDCR_STATUS_CODE_06,	MDCR_STATUS_CODE_07,	MDCR_STATUS_CODE_08,	MDCR_STATUS_CODE_09,	MDCR_STATUS_CODE_10,	MDCR_STATUS_CODE_11,	MDCR_STATUS_CODE_12,	BENE_DEATH_DT AS DEATH_DT,	PTC_PLAN_TYPE_CD_01,	PTC_PLAN_TYPE_CD_02,	PTC_PLAN_TYPE_CD_03,	PTC_PLAN_TYPE_CD_04,	PTC_PLAN_TYPE_CD_05,	PTC_PLAN_TYPE_CD_06,	PTC_PLAN_TYPE_CD_07,	PTC_PLAN_TYPE_CD_08,	PTC_PLAN_TYPE_CD_09,	PTC_PLAN_TYPE_CD_10,	PTC_PLAN_TYPE_CD_11,	PTC_PLAN_TYPE_CD_12,	DUAL_STUS_CD_01,	DUAL_STUS_CD_02,	DUAL_STUS_CD_03,	DUAL_STUS_CD_04,	DUAL_STUS_CD_05,	DUAL_STUS_CD_06,	DUAL_STUS_CD_07,	DUAL_STUS_CD_08,	DUAL_STUS_CD_09,	DUAL_STUS_CD_10,	DUAL_STUS_CD_11,	DUAL_STUS_CD_12,	VALID_DEATH_DT_SW AS V_DOD_SW,
+2021 as year_w, RTI_RACE_CD as RTI_RACE_2021  
+from bene.MBSF_ABCD_SUMMARY_2021
+(keep=bene_id	BENE_ENROLLMT_REF_YR	RTI_RACE_CD	COVSTART	ENTLMT_RSN_ORIG	ESRD_IND	STATE_CNTY_FIPS_CD_01	STATE_CNTY_FIPS_CD_02	STATE_CNTY_FIPS_CD_03	STATE_CNTY_FIPS_CD_04	STATE_CNTY_FIPS_CD_05	STATE_CNTY_FIPS_CD_06	STATE_CNTY_FIPS_CD_07	STATE_CNTY_FIPS_CD_08	STATE_CNTY_FIPS_CD_09	STATE_CNTY_FIPS_CD_10	STATE_CNTY_FIPS_CD_11	STATE_CNTY_FIPS_CD_12		BENE_BIRTH_DT	SEX_IDENT_CD	HMO_IND_01	HMO_IND_02	HMO_IND_03	HMO_IND_04	HMO_IND_05	HMO_IND_06	HMO_IND_07	HMO_IND_08	HMO_IND_09	HMO_IND_10	HMO_IND_11	HMO_IND_12	MDCR_ENTLMT_BUYIN_IND_01	MDCR_ENTLMT_BUYIN_IND_02	MDCR_ENTLMT_BUYIN_IND_03	MDCR_ENTLMT_BUYIN_IND_04	MDCR_ENTLMT_BUYIN_IND_05	MDCR_ENTLMT_BUYIN_IND_06	MDCR_ENTLMT_BUYIN_IND_07	MDCR_ENTLMT_BUYIN_IND_08	MDCR_ENTLMT_BUYIN_IND_09	MDCR_ENTLMT_BUYIN_IND_10	MDCR_ENTLMT_BUYIN_IND_11	MDCR_ENTLMT_BUYIN_IND_12	MDCR_STATUS_CODE_01	MDCR_STATUS_CODE_02	MDCR_STATUS_CODE_03	MDCR_STATUS_CODE_04	MDCR_STATUS_CODE_05	MDCR_STATUS_CODE_06	MDCR_STATUS_CODE_07	MDCR_STATUS_CODE_08	MDCR_STATUS_CODE_09	MDCR_STATUS_CODE_10	MDCR_STATUS_CODE_11	MDCR_STATUS_CODE_12	BENE_DEATH_DT	PTC_PLAN_TYPE_CD_01	PTC_PLAN_TYPE_CD_02	PTC_PLAN_TYPE_CD_03	PTC_PLAN_TYPE_CD_04	PTC_PLAN_TYPE_CD_05	PTC_PLAN_TYPE_CD_06	PTC_PLAN_TYPE_CD_07	PTC_PLAN_TYPE_CD_08	PTC_PLAN_TYPE_CD_09	PTC_PLAN_TYPE_CD_10	PTC_PLAN_TYPE_CD_11	PTC_PLAN_TYPE_CD_12	DUAL_STUS_CD_01	DUAL_STUS_CD_02	DUAL_STUS_CD_03	DUAL_STUS_CD_04	DUAL_STUS_CD_05	DUAL_STUS_CD_06	DUAL_STUS_CD_07	DUAL_STUS_CD_08	DUAL_STUS_CD_09	DUAL_STUS_CD_10	DUAL_STUS_CD_11	DUAL_STUS_CD_12 VALID_DEATH_DT_SW
+)
+;
+quit;
+PROC SQL;
+create table all_bene_1 as 
+SELECT * FROM BENE_2019
+outer union corr 
+SELECT * FROM BENE_2020
+outer union corr 
+SELECT * FROM BENE_2021;
+quit;
+*n=197373746    ;
+
+
+*****************************************************
+***STEP 2. Classify dual enrollment and hmo status***
+*****************************************************;
+*Create annual enrollment and dual eligibility variables;
+data flag; set all_bene_1;
+length HMO_01 HMO_02 HMO_03 HMO_04 HMO_05 HMO_06 HMO_07 HMO_08 HMO_09 HMO_10 HMO_11 HMO_12 
+DUAL_01 DUAL_02 DUAL_03 DUAL_04 DUAL_05 DUAL_06 DUAL_07 DUAL_08 DUAL_09 DUAL_10 DUAL_11 DUAL_12 $1.;
+
+array buy_in [12] $		BUYIN01 BUYIN02 BUYIN03 BUYIN04 BUYIN05 BUYIN06
+						BUYIN07 BUYIN08 BUYIN09 BUYIN10 BUYIN11 BUYIN12;
+						
+array hmo_in [12] $		HMOIND01 HMOIND02 HMOIND03 HMOIND04 HMOIND05 HMOIND06 
+						HMOIND07 HMOIND08 HMOIND09 HMOIND10 HMOIND11 HMOIND12;
+						
+array hmo_out [12] $	HMO_01 HMO_02 HMO_03 HMO_04 HMO_05 HMO_06 
+						HMO_07 HMO_08 HMO_09 HMO_10 HMO_11 HMO_12 ; 
+						
+array DUAL_STUS_IN [12] $ DUAL_STUS_CD_01 DUAL_STUS_CD_02 DUAL_STUS_CD_03 DUAL_STUS_CD_04
+						  DUAL_STUS_CD_05 DUAL_STUS_CD_06 DUAL_STUS_CD_07 DUAL_STUS_CD_08
+						  DUAL_STUS_CD_09 DUAL_STUS_CD_10 DUAL_STUS_CD_11 DUAL_STUS_CD_12;
+
+array DUAL_STUS_out[12] $ 	DUAL_01 DUAL_02 DUAL_03 DUAL_04 DUAL_05 DUAL_06
+	   						DUAL_07 DUAL_08 DUAL_09 DUAL_10 DUAL_11 DUAL_12;
+
+array FOIA_out [12] $	FO_01 FO_02 FO_03 FO_04 FO_05 FO_06 
+						FO_07 FO_08 FO_09 FO_10 FO_11 FO_12 ; 
+
+	
+do i=1 to 12;
+hmo_out[i]=" "; 
+		DUAL_STUS_out[i]="";
+
+*Approach A: Flag Traditional Medicare months per VBP definition;	
+if hmo_in(i) in ("0","4") and buy_in(i) in ("1","3","A","C") then foia_out(i) = "F";
+	else foia_out(i) = "X";
+		
+	
+*Approach B: Flag Traditional Medicare and Medicare Advantage for additional analyses;
+if hmo_in[i]="0" and buy_in[i]="00" then hmo_out[i]="X"; 
+	else if hmo_in[i] in ("0", "4") then hmo_out[i]="F";
+	else if hmo_in[i] in ("1", "C") then hmo_out[i]="M";
+	
+* Flag dual-eligible beneficiaries (2014);
+if DUAL_STUS_IN[i] in ("99", "NA", "00") then DUAL_STUS_out[i] = "X"; *Non-dual or not enrolled;
+	else if DUAL_STUS_IN[i] in ("02", "04", "08") then  DUAL_STUS_out[i] = "F"; *full dual;
+	else if DUAL_STUS_IN[i] in ("01", "03", "05", "06") then  DUAL_STUS_out[i] = "P"; *partial dual;
+	else if DUAL_STUS_IN[i] in ("09") then DUAL_STUS_out[i]="O"; *other dual,but not medicaid;
+	
+end; 
+
+drop i /*year_w*/; 
+
+run; 
+*197373746  ;
+
+
+*Create concatenated Medicare coverage type variables; 
+data mbsf_short ; set flag;
+length cov_yr dual_yr FOIA_YR $12; 
+
+cov_yr= cat(HMO_01, HMO_02, HMO_03, HMO_04, HMO_05, HMO_06, 
+			HMO_07, HMO_08, HMO_09, HMO_10, HMO_11, HMO_12);
+dual_yr= cat(DUAL_01, DUAL_02, DUAL_03, DUAL_04, DUAL_05, DUAL_06, 
+			DUAL_07, DUAL_08, DUAL_09, DUAL_10, DUAL_11, DUAL_12);
+FOIA_YR= COMPRESS(cat(FO_01, FO_02, FO_03, FO_04, FO_05, FO_06, 
+			FO_07, FO_08, FO_09, FO_10, FO_11, FO_12));
+
+*Create a single rti_race variable; 
+array rti_in [3] $ RTI_RACE_2021 RTI_RACE_2020 RTI_RACE_2019;
+			
+*code for missing all years race; 
+if RTI_RACE_2019="" then RTI_RACE_2014="X";
+
+*Fill missing race with next year value;
+RTI_RACE=rti_in[1];
+
+do i=1 to 3; 
+	if RTI_RACE="" then RTI_RACE=rti_in[i+1] ; 
+end;
+
+drop rti_race_cd RTI_RACE_: ;
+run;
+*197373746;
+
+*****************************************************
+***STEP 3. *Stack concatenated variables over year; ***
+*****************************************************;
+
+proc sort data=mbsf_short; by bene_id rfrnc_yr; run; 
+
+*a. create beneficiary-level dataset; 
+proc transpose data=mbsf_short out=wide prefix=covyr;
+	by bene_id ;
+	id rfrnc_yr;
+	var cov_yr; 
+run; 
+
+proc transpose data=mbsf_short out=wide1 prefix=dualyr;
+	by bene_id ;
+	id rfrnc_yr;
+	var dual_yr; 
+run; 
+proc transpose data=mbsf_short out=wide2 prefix=FOIAYR;
+	by bene_id ;
+	id rfrnc_yr;
+	var FOIA_YR; 
+run; 
+*n=72291649    per bene_id; 
+	
+*Bring back coverage and death date variables; 
+proc sort data=mbsf_short; by bene_id death_dt; run; 
+
+DATA DEATH_DT; SET MBSF_SHORT; BY BENE_ID;
+IF LAST.BENE_ID;
+RUN;
+
+proc sql noprint; 
+
+create table wide_3 as 
+select a.*,b.*, c.*, D.*
+from  wide as a 
+left join wide1 as b on a.bene_id =b.bene_id
+left join WIDE2 as c on a.bene_id =c.bene_id
+left join death_dt as D on a.bene_id =D.bene_id;
+*72291649   ;
+quit;
+
+
+*****************************************************
+***STEP 4. *Combine and save annual data 2019-2021; ***
+*****************************************************;
+
+data FOIADATA.mbsf_20_21; 
+length 	covyr2019 covyr2020 covyr2021
+		dualyr2019 dualyr2020 dualyr2021 $12
+		cov_all dual_all FOIA_ALL $72.;
+set wide_3; 
+
+*Adding missing year units for years when beneficiary is not in mbsf;
+if covyr2019=" " then covyr2019="999999999999";
+if covyr2020=" " then covyr2020="999999999999";
+if covyr2021=" " then covyr2021="999999999999";
+
+cov_all=cat(covyr2019, covyr2020, covyr2021);
+
+*Dual eligibility;
+if dualyr2019=" " then dualyr2019="999999999999";
+if dualyr2020=" " then dualyr2020="999999999999";
+if dualyr2021=" " then dualyr2021="999999999999";
+
+dual_all=cat(dualyr2019, dualyr2020, dualyr2021);
+
+if FOIAyr2019=" " then FOIAyr2019="999999999999";
+if FOIAyr2020=" " then FOIAyr2020="999999999999";
+if FOIAyr2021=" " then FOIAyr2021="999999999999";
+FOIA_all=cat(FOIAyr2019, FOIAyr2020, FOIAyr2021);
+
+keep bene_id  death_dt dualyr: dual_all covyr: cov_all STATE_CNTY_FIPS_CD_01-STATE_CNTY_FIPS_CD_12 FOIAYR: FOIA_all; 
+label cov_all="Coverage Status by Month, F=FFS, M=MA, X=Neither, 9=Missing"
+		dual_all="Dual status by month, X=Non-dual or not enrolled F=full dual, P=partial dual, O=other but not medicaid, 9=Missing";
+;
+run; *72291649 ;
