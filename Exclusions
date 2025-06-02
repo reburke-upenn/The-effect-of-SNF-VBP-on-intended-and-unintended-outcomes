@@ -1,0 +1,241 @@
+*****************************************************************************************************************************************
+*  Project Name :           SNF DID Analysis				 																			*
+*  Principal Investigator : Burke																										*
+*  Name of Program :        2_EXCLUSIONS.sas																							*
+*  Programmer :             Jonathan Heintz                                                                 							*
+*  Start Date :             March 26th, 2024	                                                               							*
+*  Program Description :	Combine created MBSF and Medpar cohorts for exclusions 
+
+This program applies logic published under the Skilled Nursing Facility 
+Value-Based Purchasing (SNF VBP) Program. See:
+https://www.cms.gov/medicare/quality/nursing-home-improvement/value-based-purchasing/measures
+
+Specific code files were provided by CMS via the following Freedom of Information Act (FOIA) request: 
+
+Control/ID Number: 042320237001
+Request Submitted to CMS: 04/26/2023
+Records Released: 02/26/2024
+Subject: Risk-Standardized Readmissions Rates
+Submitting organization: University of Pennsylvania
+
+This program is adapted to use MBSF beneficiary data in place of EDB files.
+*****************************************************************************************************************************************;
+
+*Run library locations;
+%include '[filepath to code writing library locations]';
+
+*******************************************
+***Step 1. Bring in MBSF Enrollment data***
+*******************************************; 
+DATA LATE_TEMP POST_TEMP PRE_TEMP; 
+SET FOIADATA.FOIA_03_PROX_11_21; /*Created dataset from 1_MEDPAR_Cohort.sas*/
+SNF_ADM_YEAR=YEAR(SNF_ADMSNDT);
+IF .<SNF_ADM_YEAR<2015 THEN OUTPUT PRE_TEMP;
+	ELSE IF 2015<=SNF_ADM_YEAR<=2019 THEN OUTPUT POST_TEMP;
+		ELSE IF SNF_ADM_YEAR>2019 THEN OUTPUT LATE_TEMP;
+RUN;
+proc sql noprint; 
+create table acute_bene_PRE as 
+select a.*, b.* 
+from PRE_TEMP as a left join FOIADATA.MBSF_PRE as b /*Created dataset from 0a_MBSF_2011_2014.sas*/
+on a.SNF_bene_id=b.bene_id
+order by SNF_bene_id, Prox_admsndt, Prox_DSCHRGDT; 
+ *10879406    ; 
+create table acute_bene_POST as 
+select a.*, b.* 
+from POST_TEMP as a left join FOIADATA.MBSF_POST as b /*Created dataset from 0b_MBSF_2015_2019.sas*/
+on a.SNF_bene_id=b.bene_id
+order by SNF_bene_id, Prox_admsndt, Prox_DSCHRGDT; 
+*13539925    ;
+create table acute_bene_20_21 as 
+select a.*, b.* 
+from LATE_TEMP as a left join FOIADATA.MBSF_20_21 as b /*Created dataset from 0c_MBSF_2020_2021.sas*/
+on a.SNF_bene_id=b.bene_id
+order by SNF_bene_id, Prox_admsndt, Prox_DSCHRGDT; 
+*4538153   ;
+quit;
+
+DATA acute_bene; SET acute_bene_PRE acute_bene_POST acute_bene_20_21; RUN;
+*28957484   ;
+
+
+**************************************************
+***Step 2. Creating loose and strict FFS flags***
+**************************************************;
+data cov_type; set acute_bene ; 
+dschr_year=year(Prox_DSCHRGDT);
+dschr_mon=month(Prox_DSCHRGDT);
+
+death_year=year(deathdt);
+death_mon=month(deathdt);
+
+IF 	2015<=dschr_year<=2019 THEN DO;
+	end_num=(dschr_year-2014)*12 + dschr_mon; *Month of discharge;
+	start_num=end_num-11; *11 months prior to discharge;
+	
+	IF end_num NE . THEN DO;
+		dual_check=substr(dual_all, end_num, 1);
+		cov_check=substr(cov_all, start_num, end_num-start_num+1);
+		cov_admsn=substr(cov_all, end_num, 1);
+		FOIA_check=substr(FOIA_all, start_num, end_num-start_num+1);
+	END;
+	
+	*Allow unenrolled status for death;
+	if death_year=dschr_year and death_mon=dschr_mon then do;
+		if index(cov_check, "FM") or index(cov_check, "MF") then flag="switch";
+			else if index(cov_check, "XF") or index(cov_check, "XM") then flag="N/A";	
+			else if index(cov_check, "F") then flag="FFS";		
+			else if index(cov_check, "M") then flag="MA";
+		if index(FOIA_check, "X") then FOIA_flag="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag="FFS";
+		if index(FOIA_check, "FM") or index(FOIA_check, "MF") then FOIA_flag2="switch";
+			else if index(FOIA_check, "XF") or index(FOIA_check, "XM") then FOIA_flag2="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag2="FFS";
+			else if index(FOIA_check, "M") then FOIA_flag2="MA";
+	end;
+		
+	*Enrollment type for all other patients; 
+	else do;
+		if index(cov_check, "FM") or index(cov_check, "MF") then flag="switch";
+			else if index(cov_check, "X") or index(cov_check, "9") then flag="N/A";		
+			else if index(cov_check, "F") then flag="FFS";
+			else if index(cov_check, "M") then flag="MA";
+		if index(FOIA_check, "X") then FOIA_flag="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag="FFS";
+		if index(FOIA_check, "FM") or index(FOIA_check, "MF") then FOIA_flag2="switch";
+			else if index(FOIA_check, "XF") or index(FOIA_check, "XM") then FOIA_flag2="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag2="FFS";
+			else if index(FOIA_check, "M") then FOIA_flag2="MA";
+	END;
+END;
+ELSE IF 2011<=dschr_year<=2014 THEN DO;
+	end_num=(dschr_year-2010)*12 + dschr_mon; *Month of discharge;
+	start_num=end_num-11; *11 months prior to discharge;
+	
+	IF end_num NE . THEN DO;
+		dual_check=substr(dual_all, end_num, 1);
+		cov_check=substr(cov_all, start_num, end_num-start_num+1);
+		cov_admsn=substr(cov_all, end_num, 1);
+		FOIA_check=substr(FOIA_all, start_num, end_num-start_num+1);
+	END;
+	
+	*Allow unenrolled status for death;
+	if death_year=dschr_year and death_mon=dschr_mon then do;
+		if index(cov_check, "FM") or index(cov_check, "MF") then flag="switch";
+			else if index(cov_check, "XF") or index(cov_check, "XM") then flag="N/A";	
+			else if index(cov_check, "F") then flag="FFS";		
+			else if index(cov_check, "M") then flag="MA";
+		if index(FOIA_check, "X") then FOIA_flag="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag="FFS";
+		if index(FOIA_check, "FM") or index(FOIA_check, "MF") then FOIA_flag2="switch";
+			else if index(FOIA_check, "XF") or index(FOIA_check, "XM") then FOIA_flag2="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag2="FFS";
+			else if index(FOIA_check, "M") then FOIA_flag2="MA";
+	end;
+		
+		*Enrollment type for all other patients; 
+	else do;
+		if index(cov_check, "FM") or index(cov_check, "MF") then flag="switch";
+			else if index(cov_check, "X") or index(cov_check, "9") then flag="N/A";		
+			else if index(cov_check, "F") then flag="FFS";
+			else if index(cov_check, "M") then flag="MA";
+		if index(FOIA_check, "X") then FOIA_flag="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag="FFS";
+		if index(FOIA_check, "FM") or index(FOIA_check, "MF") then FOIA_flag2="switch";
+			else if index(FOIA_check, "XF") or index(FOIA_check, "XM") then FOIA_flag2="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag2="FFS";
+			else if index(FOIA_check, "M") then FOIA_flag2="MA";
+	end;
+END;
+
+ELSE IF dschr_year>=2020 THEN DO;
+	end_num=(dschr_year-2019)*12 + dschr_mon; *Month of discharge;
+	start_num=end_num-11; *11 months prior to discharge;
+	
+	IF end_num NE . THEN DO;
+		dual_check=substr(dual_all, end_num, 1);
+		cov_check=substr(cov_all, start_num, end_num-start_num+1);
+		cov_admsn=substr(cov_all, end_num, 1);
+		FOIA_check=substr(FOIA_all, start_num, end_num-start_num+1);
+	END;
+	
+	*Allow unenrolled status for death;
+	if death_year=dschr_year and death_mon=dschr_mon then do;
+		if index(cov_check, "FM") or index(cov_check, "MF") then flag="switch";
+			else if index(cov_check, "XF") or index(cov_check, "XM") then flag="N/A";	
+			else if index(cov_check, "F") then flag="FFS";		
+			else if index(cov_check, "M") then flag="MA";
+		if index(FOIA_check, "X") then FOIA_flag="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag="FFS";
+		if index(FOIA_check, "FM") or index(FOIA_check, "MF") then FOIA_flag2="switch";
+			else if index(FOIA_check, "XF") or index(FOIA_check, "XM") then FOIA_flag2="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag2="FFS";
+			else if index(FOIA_check, "M") then FOIA_flag2="MA";
+	end;
+	
+	*Enrollment type for all other patients; 
+	else do;
+		if index(cov_check, "FM") or index(cov_check, "MF") then flag="switch";
+			else if index(cov_check, "X") or index(cov_check, "9") then flag="N/A";		
+			else if index(cov_check, "F") then flag="FFS";
+			else if index(cov_check, "M") then flag="MA";
+		if index(FOIA_check, "X") then FOIA_flag="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag="FFS";
+		if index(FOIA_check, "FM") or index(FOIA_check, "MF") then FOIA_flag2="switch";
+			else if index(FOIA_check, "XF") or index(FOIA_check, "XM") then FOIA_flag2="N/A";
+			else if index(FOIA_check, "F") then FOIA_flag2="FFS";
+			else if index(FOIA_check, "M") then FOIA_flag2="MA";
+	end;
+END;
+run;*28957484 ;
+
+
+PROC SORT DATA=cov_type; BY YEAR; RUN;
+DATA FOIADATA.ALL_EXCL_EXCEPT5_8; SET cov_type; RUN;
+
+proc freq data =FOIADATA.ALL_EXCL_EXCEPT5_8;
+ tables dschr_year*(flag foia_flag foia_flag2); run; 
+
+
+************************************************
+****Step 3. Bringing in diagnosis exclusions***
+************************************************;
+*Index hospitalization diagnoses exclusions; 
+options validvarname=v7;
+proc import datafile="[filepath]/ICD_10_to_CCS2.csv"
+	out=icd10
+	dbms=csv
+	replace;
+	getnames=yes;
+	guessingrows=500;
+run;
+
+options validvarname=v7;
+proc import datafile="[filepath]/ICD9_CSS2.csv"
+	out=icd9
+	dbms=csv
+	replace;
+	getnames=yes;
+	guessingrows=500;
+run;
+
+proc sql noprint;
+	create table pre_MED_excl as 
+	select * from cov_type where 
+	(Prox_DGNS_VRSN_CD_1='9' and strip(compress(PROX_DGNS_CD01, , "DAk")) 
+		not in (select distinct strip(ICD_9_CM_CODE) from icd9)) 
+	or (Prox_DGNS_VRSN_CD_1 ne'9' and strip(compress(PROX_DGNS_CD01, , "DAk")) 
+	not in (select distinct strip(ICD_10_CM_CODE) from icd10));
+quit;
+
+
+******************************************************************
+***Step 4. Creating cohort applying all rules***
+******************************************************************;
+PROC CONTENTS DATA=FOIADATA.FOIA_11_21 ORDER=IGNORECASE;RUN;
+DATA FOIADATA.FOIA_11_21; SET pre_MED_excl;
+IF Coinciding_IRF_LTCH_Def2=0 & MultipleSNFs=0 & exclude_SNF_utlznDays0=0 & exclude_nopay=0
+	& exclude_nonUS=0 & exclude_FedHospTransfer=0 & exclude_SNF_AMA=0 & Exclude_unreliable_demog_info=0
+	& Exclude_already_dead_Medpar=0 /*& CAH_exclusion=0*/ & exclude_embedded=0 & FOIA_flag='FFS' & PRIOR_PROXIMAL_STAY=1;
+RUN;*17999259   ;
+
