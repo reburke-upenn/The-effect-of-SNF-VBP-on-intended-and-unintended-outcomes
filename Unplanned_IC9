@@ -1,0 +1,823 @@
+*****************************************************************************************************************************************
+*  Project Name :           SNF DID Analysis				 																			*
+*  Principal Investigator : Burke																										*
+*  Name of Program :        3a_Unplanned_ICD9.sas																							*
+*  Programmer :             Scott Appel		                                                                							*
+*  Proofread  :				F Hutchins 8/13/24
+*  Start Date :             April, 2024	                                                  		             							*
+*  Program Description :	Identify unplanned hospital readmissions using ICD-9s												*
+
+This program applies logic published under the Skilled Nursing Facility 
+Value-Based Purchasing (SNF VBP) Program. See:
+https://www.cms.gov/medicare/quality/nursing-home-improvement/value-based-purchasing/measures
+
+Specific code files were provided by CMS via the following Freedom of Information Act (FOIA) request: 
+
+Control/ID Number: 042320237001
+Request Submitted to CMS: 04/26/2023
+Records Released: 02/26/2024
+Subject: Risk-Standardized Readmissions Rates
+Submitting organization: University of Pennsylvania
+
+This program is adapted for use with ICD-9s in relevant years
+*****************************************************************************************************************************************;
+
+*Run library locations;
+%include '[filepath to code writing library locations]';
+
+%let dsin  = FOIADATA.FOIA_11_21;   /* Specify input dataset: Created data from 2_EXCLUSIONS.sas */ 
+%let dsout =  FOIADATA.foia_icd9;   /* Specify output dataset*/
+
+/* input files for CCS diagnoses and CCS procedures*/
+filename inraw3 '[filepath]';
+
+ **********************************************************************
+ ***                                                                ***
+ ***                   M A I N    C O M M E N T S                   ***
+ ***                                                                ***
+ **********************************************************************
+ *** This program identifies unplanned hospital readmissions (ICD9) ***
+ ***                                                                ***
+ **********************************************************************; 
+
+
+/* importing diagnoses */
+proc import out=raw1 
+    datafile="[filepath]/$dxref 2015.csv"
+	dbms=csv
+	replace;
+	getnames=no;
+/* 	namerow=2; */
+	datarow=3;
+	guessingrows=500;
+run;
+data raw1; set raw1;
+    rename
+    var1=_ICD9_CM_Code 
+    var2=_CCS_Category 
+    var3 =CCS_Description 
+    var4 =ICD9_CM_Code_Description;
+run; 
+
+/* fix imbedded decimals and CCS category variables */
+data raw1_reformat(drop=_: keep=ICD9_CM_Code CCS_Category);
+    length ICD9_CM_Code $ 7 CCS_Category $ 4;
+    set raw1;
+
+    ICD9_CM_Code=upcase(compress(_ICD9_CM_Code,"."));
+    CCS_Category=upcase(put(_CCS_Category,4. -L));
+run; 
+
+/* Potential QA issue with the input files as they contain duplicates */
+proc sort data=raw1_reformat out=_raw1_reformat;
+by ICD9_CM_Code;
+run;
+
+proc sort data=raw1_reformat nodupkey;
+by ICD9_CM_Code;
+run;
+
+data _cntdupsdxfinder;
+    set _raw1_reformat;
+    by ICD9_CM_Code;
+    
+    if first.ICD9_CM_Code then count=0;
+    count + 1;
+    if last.ICD9_CM_Code;
+run;
+data _cntdupsdxfinder(keep=ICD9_CM_Code); set _cntdupsdxfinder(where=(count>1)); run;
+
+data _fulldxdups;
+    merge _cntdupsdxfinder(in=aa)
+          _raw1_reformat(in=bb)
+          ;
+    by ICD9_CM_Code;
+    
+    if aa and bb;
+run;
+
+/* dataset for format */
+data icd9_raw1_formats		;							/******** Specify dataset name ********/ 
+    set raw1_reformat(rename=(ICD9_CM_Code=Start CCS_Category=Label)) end=EOF;
+
+    retain fmtname "$DX10f" type 'C';
+ 
+    output;
+
+    if EOF then do;
+        Start="OTHER";
+        Label="*****"; 
+        output;
+    end;      
+run;
+
+/* create format */
+proc format cntlin=icd9_raw1_formats		;			/******** Specify dataset name ********/ 
+run;
+
+
+
+
+
+/* importing procedures */
+proc import datafile="[filepath]/$prref 2015.csv"
+	out=raw2
+	dbms=csv
+	replace;
+	getnames=no;
+/* 	namerow=2; */
+	datarow=3;
+	guessingrows=500;
+run;
+
+data raw2; set raw2;
+    rename
+    var1=_ICD9_PCS_Code 
+    var2=_CCS_Category 
+    var3 =CCS_Description 
+    var4 =ICD9_PCS_Code_Description;
+run; 
+
+/* fix imbedded decimals and CCS category variables */
+data raw2_reformat(drop=_: keep=ICD9_PCS_Code CCS_Category);
+    length ICD9_PCS_Code $ 7 CCS_Category $ 4;
+    set raw2;
+
+    ICD9_PCS_Code=upcase(compress(_ICD9_PCS_Code,"."));
+    CCS_Category=upcase(put(_CCS_Category,4. -L));
+run; 
+
+/* Potential QA issue with the input files as they contain duplicates */
+proc sort data=raw2_reformat out=_raw2_reformat;
+by ICD9_PCS_Code;
+run;
+
+proc sort data=raw2_reformat nodupkey;
+by ICD9_PCS_Code;
+run;
+
+data _cntdupspxfinder;
+    set _raw2_reformat;
+    by ICD9_PCS_Code;
+    
+    if first.ICD9_PCS_Code then count=0;
+    count + 1;
+    if last.ICD9_PCS_Code;
+run;
+data _cntdupspxfinder(keep=ICD9_PCS_Code); set _cntdupspxfinder(where=(count>1)); run;
+
+data _fullpxdups;
+    merge _cntdupspxfinder(in=aa)
+          _raw2_reformat(in=bb)
+          ;
+    by ICD9_PCS_Code;
+    
+    if aa and bb;
+run;
+
+/* dataset for format */
+data icd9_raw2_formats		;						/******** Specify dataset name ********/ 
+    set raw2_reformat(rename=(ICD9_PCS_Code=Start CCS_Category=Label)) end=EOF;
+
+    retain fmtname "$PR10f" type 'C';
+ 
+    output;
+
+    if EOF then do;
+        Start="OTHER";
+        Label="*****"; 
+        output;
+    end;   
+run;
+
+/* create format */
+proc format cntlin=	icd9_raw2_formats		;		/******** Specify dataset name ********/ 
+run;
+
+proc catalog catalog=work.formats;
+    contents stat;
+    title 'NEW FORMATS';
+run;
+
+/* REDUCING YEARS to ICD9 */ 
+data in_icd9;
+set &dsin;
+where Prox_DGNS_VRSN_CD_1 = '9';
+run;
+
+
+/* Apply categories to readmission dx and procedures */
+DATA analysis_file;
+    length 
+        READM_DXCC1-READM_DXCC25 
+        READM_PRCC1-READM_PRCC25 
+            $7.;
+
+    * Reads in SNF index admission stay level file created by previous;
+    * program in the series.;
+  set in_icd9;
+
+    array READM_DGNS_CD(*) READM_DGNS_CD1-READM_DGNS_CD25;
+    array READM_DXCC(*)    READM_DXCC1-READM_DXCC25;
+
+    array READM_SRGCL_PRCDR_CD(*) READM_PRCDR_CD1-READM_PRCDR_CD25;
+    array READM_PRCC(*)           READM_PRCC1-READM_PRCC25;
+
+
+    * If this SNF index stay admission had a readmission.;
+    if readmit_ipps2 = 1 then do;
+         * AHRQ CCS for diagnoses;
+        do _I = 1 to dim(READM_DGNS_CD);
+            READM_DGNS_CD(_I) = left(upcase(READM_DGNS_CD(_I)));
+            
+            if READM_DGNS_CD(_I) not in("0","") then do;
+                READM_DXCC(_I) = left(put(READM_DGNS_CD(_I),$DX10f.));
+            end;
+        end;
+
+        * AHRQ CCS for procedures;
+        do _I = 1 to dim(READM_SRGCL_PRCDR_CD);
+            READM_SRGCL_PRCDR_CD(_I) = left(upcase(READM_SRGCL_PRCDR_CD(_I)));
+
+            if READM_SRGCL_PRCDR_CD(_I) not in("0","") then do;
+                READM_PRCC(_I) = left(put(READM_SRGCL_PRCDR_CD(_I),$PR10f.));
+            end;
+        end; 
+    end;
+
+
+    drop
+        _I
+        ;
+
+    label 
+        READM_DXCC1  = "AHRQ CCS Single Level Code Based on Primary Diagnosis "
+        READM_DXCC2  = "AHRQ CCS Single Level Code Based on Diagnosis 2"
+        READM_DXCC3  = "AHRQ CCS Single Level Code Based on Diagnosis 3"
+        READM_DXCC4  = "AHRQ CCS Single Level Code Based on Diagnosis 4"
+        READM_DXCC5  = "AHRQ CCS Single Level Code Based on Diagnosis 5"
+        READM_DXCC6  = "AHRQ CCS Single Level Code Based on Diagnosis 6"
+        READM_DXCC7  = "AHRQ CCS Single Level Code Based on Diagnosis 7"
+        READM_DXCC8  = "AHRQ CCS Single Level Code Based on Diagnosis 8"
+        READM_DXCC9  = "AHRQ CCS Single Level Code Based on Diagnosis 9"
+        READM_DXCC10 = "AHRQ CCS Single Level Code Based on Diagnosis 10"
+        READM_DXCC11 = "AHRQ CCS Single Level Code Based on Diagnosis 11"
+        READM_DXCC12 = "AHRQ CCS Single Level Code Based on Diagnosis 12"
+        READM_DXCC13 = "AHRQ CCS Single Level Code Based on Diagnosis 13"
+        READM_DXCC14 = "AHRQ CCS Single Level Code Based on Diagnosis 14"
+        READM_DXCC15 = "AHRQ CCS Single Level Code Based on Diagnosis 15"
+        READM_DXCC16 = "AHRQ CCS Single Level Code Based on Diagnosis 16"
+        READM_DXCC17 = "AHRQ CCS Single Level Code Based on Diagnosis 17"
+        READM_DXCC18 = "AHRQ CCS Single Level Code Based on Diagnosis 18"
+        READM_DXCC19 = "AHRQ CCS Single Level Code Based on Diagnosis 19"
+        READM_DXCC20 = "AHRQ CCS Single Level Code Based on Diagnosis 20"
+        READM_DXCC21 = "AHRQ CCS Single Level Code Based on Diagnosis 21"
+        READM_DXCC22 = "AHRQ CCS Single Level Code Based on Diagnosis 22"
+        READM_DXCC23 = "AHRQ CCS Single Level Code Based on Diagnosis 23"
+        READM_DXCC24 = "AHRQ CCS Single Level Code Based on Diagnosis 24"
+        READM_DXCC25 = "AHRQ CCS Single Level Code Based on Diagnosis 25"
+
+        READM_PRCC1  = "AHRQ CCS Single Level Code Based on Primary Procedure 1"
+        READM_PRCC2  = "AHRQ CCS Single Level Code Based on Procedure 2"
+        READM_PRCC3  = "AHRQ CCS Single Level Code Based on Procedure 3"
+        READM_PRCC4  = "AHRQ CCS Single Level Code Based on Procedure 4"
+        READM_PRCC5  = "AHRQ CCS Single Level Code Based on Procedure 5"
+        READM_PRCC6  = "AHRQ CCS Single Level Code Based on Procedure 6"
+        READM_PRCC7  = "AHRQ CCS Single Level Code Based on Procedure 7"
+        READM_PRCC8  = "AHRQ CCS Single Level Code Based on Procedure 8"
+        READM_PRCC9  = "AHRQ CCS Single Level Code Based on Procedure 9"
+        READM_PRCC10 = "AHRQ CCS Single Level Code Based on Procedure 10"
+        READM_PRCC11 = "AHRQ CCS Single Level Code Based on Procedure 11"
+        READM_PRCC12 = "AHRQ CCS Single Level Code Based on Procedure 12"
+        READM_PRCC13 = "AHRQ CCS Single Level Code Based on Procedure 13"
+        READM_PRCC14 = "AHRQ CCS Single Level Code Based on Procedure 14"
+        READM_PRCC15 = "AHRQ CCS Single Level Code Based on Procedure 15"
+        READM_PRCC16 = "AHRQ CCS Single Level Code Based on Procedure 16"
+        READM_PRCC17 = "AHRQ CCS Single Level Code Based on Procedure 17"
+        READM_PRCC18 = "AHRQ CCS Single Level Code Based on Procedure 18"
+        READM_PRCC19 = "AHRQ CCS Single Level Code Based on Procedure 19"
+        READM_PRCC20 = "AHRQ CCS Single Level Code Based on Procedure 20"
+        READM_PRCC21 = "AHRQ CCS Single Level Code Based on Procedure 21"
+        READM_PRCC22 = "AHRQ CCS Single Level Code Based on Procedure 22"
+        READM_PRCC23 = "AHRQ CCS Single Level Code Based on Procedure 23"
+        READM_PRCC24 = "AHRQ CCS Single Level Code Based on Procedure 24"
+        READM_PRCC25 = "AHRQ CCS Single Level Code Based on Procedure 25"
+        ;
+run;
+
+
+/* Import PRA tables from inraw3 */
+
+%macro tbls(dsname,sheetname);
+    proc import out=out1.&dsname.
+        datafile=inraw3
+        dbms=xlsx 
+        replace;
+         
+        sheet=&sheetname.; 
+        getnames=YES;
+        datarow=2;
+    run;
+%mend tbls;
+%tbls(_fmts_pr1,"PR.1 Always Planned Px (Gen)");
+%tbls(_fmts_pr2,"PR.2 Always Planned Dx (Gen)");
+%tbls(_fmts_pr3,"PR.3 Pot Planned Px (Gen)");
+%tbls(_fmtsk_pr4,"PR.4 Acute Dx (Gen)");
+%tbls(_fmts_pr5,"PR.5 RTI Planned Px");
+%tbls(_fmts_pr5rti881,"RTI881");
+%tbls(_fmts_pr5rti883,"RTI883");
+
+%global rti881pcs rti881cm;
+
+proc sql noprint;
+    select quote(ICD_10_PCS_CODE)
+        into :rti881pcs separated by ", "
+            from OUT1._FMTS_PR5RTI881		;				/******** Specify dataset name ********/ 
+quit;
+
+data t_rti881cm;
+    set out1._fmts_pr5rti881(where=(~missing(ICD_10_CM_CODE)));		/******** Specify dataset name ********/ 
+run;
+
+
+proc sql noprint;
+   select quote(ICD_10_CM_CODE)
+      into :rti881cm
+      from T_rti881cm;
+quit;
+
+*-----------------------------------------------------------------;
+
+%global rti883pcs rti883cm;
+
+proc sql noprint;
+    select quote(ICD_10_PCS_CODE)
+        into :rti883pcs separated by ", "
+        from out1._fmts_pr5rti883;			/******** Specify dataset name ********/ 
+quit;
+
+
+data t_rti883cm;
+    set out1._fmts_pr5rti883 (where=(~missing(ICD_10_CM_CODE)));		/******** Specify dataset name ********/ 
+run;
+
+
+proc sql noprint;
+    select quote(ICD_10_CM_CODE)
+        into :rti883cm separated by ", "
+        from T_rti883cm ;
+quit;
+
+*-----------------------------------------------------------------;
+
+data out1._fmts_pr3_ccs (drop=CCS_Px_or_ICD_10_PCS_Code Added_Removed_Revised_for_2020);
+    set out1._fmts_pr3 (keep=CCS_CATEGORY_OR_ICD_10 CCS_Px_or_ICD_10_PCS_Code Added_Removed_Revised_for_2020
+                 where=(CCS_Px_or_ICD_10_PCS_Code = "CCS" and upcase(substr(Added_Removed_Revised_for_2020,1,7)) ne "REMOVED"));
+run;
+
+*-----------------------------------------------------------------;
+
+data out1._fmts_pr3_pcs (drop=Added_Removed_Revised_for_2020 CCS_Px_or_ICD_10_PCS_Code);
+   SET out1._fmts_pr3 (keep=CCS_CATEGORY_OR_ICD_10 CCS_Px_or_ICD_10_PCS_Code Added_Removed_Revised_for_2020
+                where=(CCS_Px_or_ICD_10_PCS_Code = "ICD-10-PCS" AND upcase(SUBSTR(Added_Removed_Revised_for_2020,1,7)) NE "REMOVED")) ;
+       rename CCS_CATEGORY_OR_ICD_10 = ICD_10_PCS_CODE;
+run;
+
+*-----------------------------------------------------------------;
+
+data out1._fmts_pr4_ccs (drop=CCS_Dx_Category_or_ICD10_CM_Code  Added_Removed_Revised_for_2020);
+    set out1._fmts_pr4 (keep=CCS_CATEGORY_OR_ICD_10 CCS_Dx_Category_or_ICD10_CM_Code  Added_Removed_Revised_for_2020
+                 where=(upcase(substr(Added_Removed_Revised_for_2020,1,7)) ne "REMOVED" and CCS_Dx_Category_or_ICD10_CM_Code eq "CCS"));
+run;
+
+*-----------------------------------------------------------------;
+
+data out1._fmts_pr4_cm (drop=CCS_Dx_Category_or_ICD10_CM_Code  Added_Removed_Revised_for_2020);
+    set out1._fmts_pr4 (keep=CCS_Dx_Category_or_ICD10_CM_Code  Added_Removed_Revised_for_2020 CCS_CATEGORY_OR_ICD_10
+                 where=(upcase(substr(Added_Removed_Revised_for_2020,1,7)) ne "REMOVED" and CCS_Dx_Category_or_ICD10_CM_Code eq "ICD-10-CM"));
+    rename CCS_CATEGORY_OR_ICD_10 = ICD_10_CM_CODE;
+run;
+
+*-----------------------------------------------------------------;
+
+data out1._fmts_pr5_pcs (drop=Added_Removed_Revised_for_2020 CCS_Px_or_ICD_10_PCS_Code);
+    set out1._fmts_pr5 (keep=CCS_Px_or_ICD_10_PCS_Code Added_Removed_Revised_for_2020 ICD_10_PCS_CODE
+                 where=(CCS_Px_or_ICD_10_PCS_Code = "ICD-10-PCS" and upcase(substr(Added_Removed_Revised_for_2020,1,7)) ne "REMOVED"));
+run;
+
+*-----------------------------------------------------------------;
+
+* Table 1 Procedure CCS;
+DATA FOIADATA.pr1ccsdataset9;
+   set out1._fmts_pr1;
+
+   retain fmtname "$PCCS1FMT" TYPE "C";
+
+   rename CCS_CATEGORY = START;
+
+   label = put(1,3.);
+run;
+
+
+proc format cntlin = appel.pr1ccsdataset9 library = work;
+run;
+
+
+proc catalog catalog=work.formats ;
+    modify PCCS1FMT (DESCRIPTION="ICD9 Table 1 Procedure CCS Format") / ENTRYTYPE=FORMATC;
+    contents;
+run;
+
+*-----------------------------------------------------------------;
+
+* Table 2 Diagnosis CCS;
+data FOIADATA.pr2ccsdataset9; 
+    set out1._fmts_pr2;
+
+    retain fmtname "$CCS2FMT" TYPE "C";
+
+    rename CCS_CATEGORY = START;
+
+    label = put(1,4.);
+run;
+
+
+proc format cntlin = appel.pr2ccsdataset9 library = work;
+run;
+
+
+proc catalog catalog=work.formats;
+    modify CCS2FMT (DESCRIPTION="ICD9 Table 2 CCS Format") / ENTRYTYPE=FORMATC;
+    contents ;
+run;
+
+*-----------------------------------------------------------------;
+
+* Table 3 Procedure;
+data FOIADATA.pr3pcsdataset9;
+   set out1._fmts_pr3_pcs;
+
+   retain fmtname "$PCS3FMT" TYPE "C";
+   rename ICD_10_PCS_CODE = START;
+
+   label = put(1,7.);
+run;
+
+
+proc format cntlin = appel.pr3pcsdataset9 library = work ;
+run;
+
+
+proc catalog catalog=work.formats ;
+    modify PCS3FMT (DESCRIPTION="ICD9 Table 3 Procedure Format") / ENTRYTYPE=FORMATC ;
+    contents;
+run;
+
+*-----------------------------------------------------------------;
+
+* Table 3 Procedure CCS;
+data FOIADATA.pr3ccsdataset9;
+    set out1._fmts_pr3_ccs;
+
+    retain fmtname "$CCS3FMT" TYPE "C" ;
+    rename CCS_CATEGORY_OR_ICD_10 = START ;
+    label = put(1,3.) ;
+run;
+
+
+proc format cntlin = appel.pr3ccsdataset9 library=work;
+run;
+
+
+proc catalog catalog=work.formats ;
+    modify CCS3FMT (DESCRIPTION="ICD9 Table 3 CCS Format") / ENTRYTYPE=FORMATC;
+    contents;
+run;
+
+*-----------------------------------------------------------------;
+
+* Table 4 Diagnosis CCS;
+data FOIADATA.pr4ccsdataset9;
+   set out1._fmts_pr4_ccs;
+
+   retain fmtname "$CCS4FMT" TYPE "C";
+
+   rename CCS_CATEGORY_OR_ICD_10 = START;
+
+   label = put(1,4.);
+run;
+
+
+proc format cntlin = appel.pr4ccsdataset9 library = work;
+run;
+
+
+proc catalog catalog=work.formats;
+    modify CCS4FMT (DESCRIPTION="ICD9 Table 4 CCS Format") / ENTRYTYPE=FORMATC;
+    contents;
+run;
+
+*-----------------------------------------------------------------;
+
+* Table 4 diagnosis;
+data FOIADATA.pr4cmdataset9;
+   set out1._fmts_pr4_cm;
+
+   retain fmtname "$CM4FMT" TYPE "C";
+
+   rename ICD_10_CM_CODE = START;
+
+   label = put(1,7.);
+run;
+
+
+proc format cntlin = appel.pr4cmdataset9 library = work ;
+run ;
+
+
+proc catalog catalog=work.formats;
+    modify CM4FMT (DESCRIPTION="ICD9 Table 4 Naked Diagnosis Format") / ENTRYTYPE=FORMATC;
+    CONTENTS;
+run;
+
+*-----------------------------------------------------------------;
+
+* Table 5 Procedure;
+data FOIADATA.pr5pcsdataset9;
+    set out1._fmts_pr5_pcs;
+
+    retain fmtname "$PCS5FMT" TYPE "C";
+
+    rename ICD_10_PCS_CODE = START;
+    label = put(1,7.) ;
+run;
+
+
+proc format CNTLIN = appel.pr5pcsdataset9 LIBRARY = WORK;
+run;
+
+
+proc catalog catalog=work.formats;
+    modify PCS5FMT (DESCRIPTION="ICD9 Table 5 Procedure Format") / ENTRYTYPE=FORMATC;
+    CONTENTS;
+run;
+
+*-----------------------------------------------------------------;
+
+* Save stay level file.;
+data &dsout.;
+    set analysis_file; 
+
+    length
+        excldx
+        planned_1 
+        planned_2 
+        planned
+        plan_psych
+        tablea1 
+        tablea2 
+        tablea3 
+        tablea4 
+        tablea5
+        readmit_ipps_up
+        unplanned_for_report
+            3.
+            ;
+
+    * ICD9  Procedure Codes;
+      array READM_SRGCL_PRCDR_CD(*) READM_PRCDR_CD1-READM_PRCDR_CD25;      
+        
+
+    * AHRQ CCS Procedure Codes;
+      array READM_PRCC(*) 	READM_PRCDR_CD1-READM_PRCDR_CD25; 
+          
+
+    if readmit_ipps2 = 1 then do;
+
+        *-----------------------------------------------------------------;
+        *                           PRA for HWR                           ;
+        *-----------------------------------------------------------------;
+        * Version 4.0 Planned Readmission Algorithm (PRA) for 2020 Reporting;
+        * For Use with 2020 Public Reporting of Claims Based Hospital Wide;
+        * Readmission Measures;
+        *-----------------------------------------------------------------;
+        * Initialize variables to 0;
+        excldx     = 0;
+        planned_1  = 0;
+        planned_2  = 0;
+        planned    = 0;
+        plan_psych = 0;
+        tablea1    = 0;
+        tablea2    = 0;
+        tablea3    = 0;
+        tablea4    = 0;
+        tablea5    = 0;
+        *-----------------------------------------------------------------;
+    
+        * PR1 - ALWAYS PLANNED PROC;
+        *        Table A1: Procedure Categories that are Always Planned regardless of Diagnosis;
+        *        Procedure CCS  Description;
+        *           64     Bone marrow transplant;
+        *          105     Kidney transplant;
+        *          134     Cesarean section4;
+        *          135     Forceps, vacuum and breech delivery;
+        *          176     Other organ transplantation;
+        
+        length tab1pccs1-tab1pccs25  $ 7  tab1pccs 3.;
+        array tab1_pccs (*) tab1pccs1-tab1pccs25;
+    
+        do _I = 1 to dim(READM_PRCC);
+          if READM_PRCC(_I) ne "1" then tab1_pccs(_I) = strip(put(READM_PRCC(_I),$PCCS1FMT.));
+          if tab1_pccs(_I) NE "1" THEN tab1_pccs(_I) = "0";
+        end;
+    
+        tab1pccs = 0;
+        do _I = 1 to dim(tab1_pccs);
+           if tab1_pccs(_I) eq "1" then tab1pccs = 1;
+        end;
+    
+        if tab1pccs eq 1 then do;
+            planned_2 = 1;
+            tablea1   = 1;
+        end;
+    
+        *-------------------------------------------------------------;
+    
+        * PR2 - Always Planned Diagnoses;
+        * Appendix Table A2. Diagnosis Categories That Are Always Planned;
+        * Regardless of Procedure;
+        * Diagnosis CCS Description;
+        *    45   Maintenance chemotherapy;
+        *   194   Forceps delivery;
+        *   196   Normal pregnancy and/or delivery;
+        *   254   Rehabilitation;
+        *;
+        if READM_DXCC1 ne "1" then tab2ccs = strip(put(READM_DXCC1,$CCS2FMT.));
+        if tab2ccs eq "1" then tablea2 = 1;
+    
+        *-------------------------------------------------------------;
+    
+        * PR3 - POTENTIAL PLANNED;
+        * Appendix Table A3. List of Potentially Planned CCS Procedure Categories;
+    
+        length tab3ccs1-tab3ccs25 $ 7 tab3ccs 3.;
+        array tab3_ccs (*) tab3ccs1-tab3ccs25;
+    
+        do _I = 1 to dim(READM_PRCC);
+           tab3_ccs(_I) = strip(put(READM_PRCC(_I),$CCS3FMT.));
+           if tab3_ccs(_I) ne "1" then tab3_ccs(_I) = "0";
+        end;
+    
+        tab3ccs = 0;
+        do _I = 1 to dim(tab3_ccs);
+           if tab3_ccs(_I) eq "1" then tab3ccs = 1;
+        end;
+    
+        if tab3ccs eq 1 then do;
+            tablea3   = 1;
+            planned_1 = 1;
+        end;
+    
+        *-------------------------------------------------------------;
+    
+        * PR3 - Potentially Planned ICD10 PROCEDURE CODE LEVEL;
+    
+        length tab3pcs1-tab3pcs25  $ 7  tab3pcs 3.;
+        array tab3_pcs (*) tab3pcs1-tab3pcs25;
+    
+        do _I = 1 to dim(READM_SRGCL_PRCDR_CD);
+            tab3_pcs(_I) = strip(put(READM_SRGCL_PRCDR_CD(_I),$PCS3FMT.));
+        end;
+    
+        tab3pcs = 0;
+        do _I = 1 to dim(tab3_pcs);
+            if tab3_pcs(_I) eq "1" then tab3pcs = 1;
+        end;
+    
+        if tab3pcs eq 1 then do;
+               tablea3   = 1;
+               planned_1 = 1;
+        end;
+    
+        *--------------------------------------------------------------;
+        * Appendix Table A4. Acute Diagnosis Categories That Disqualify;
+        * a Readmission from Being Considered Planned;
+        * Primary Diagnosis to Exclude from Planned;
+        length tab4ccs tab4cm $ 7;
+        tab4ccs = strip(put(READM_DXCC1,$CCS4FMT.));
+        tab4cm  = strip(put(READM_DGNS_CD1,$CM4FMT.));
+        if tab4ccs eq "1" or tab4cm eq "1" then excldx = 1;
+        if excldx = 1 then tablea4 = 1;
+
+        *--------------------------------------------------------------;
+    
+        * Appendix Table A5. RTI Additions to List of Planned Readmissions;
+        * Currently Used in the Hospital-Wide Readmission Measure;
+        length 
+            tab5pcs1-tab5pcs25 $ 7 
+            tab5pcs 3.
+            ;
+
+        array tab5_pcs (*) tab5pcs1-tab5pcs25;
+    
+
+        do _I = 1 to dim(READM_SRGCL_PRCDR_CD);
+           tab5_pcs(_I) = strip(put(READM_SRGCL_PRCDR_CD(_I),$PCS5FMT.));
+        end;
+    
+        tab5pcs = 0;
+        do _I = 1 to dim(tab5_pcs);
+           if tab5_pcs(_i) eq "1" then tab5pcs = 1;
+        end;
+    
+        if tab5pcs eq 1 then do;
+            tablea5   = 1;
+            planned_1 = 1;
+        end;
+    
+        *--------------------------------------------------------------;
+
+        * Appendix Table A5. RTI881;
+        if READM_DGNS_CD1 in (&rti881cm.) then do;
+            do _I = 1 to dim(READM_SRGCL_PRCDR_CD);
+                if READM_SRGCL_PRCDR_CD(_I) in (&rti881pcs.) then do;
+                    planned_1 = 1;
+                    tablea5   = 1;
+                end;
+            end;
+        end;
+    
+        *--------------------------------------------------------------;
+        * Appendix Table A5. RTI Planned 883;
+        if READM_DGNS_CD1 in (&rti883cm.) then do;
+            do _I = 1 to dim(READM_SRGCL_PRCDR_CD);
+                if READM_SRGCL_PRCDR_CD(_I) in (&rti883pcs.) then do;
+                    planned_1 = 1;
+                    tablea5   = 1;
+                end;
+            end;
+        end;
+    
+        *--------------------------------------------------------------;
+        * Step 1: Always Planned Procedures;
+        if planned_2 = 1 then do;
+            planned = 1;
+        end;
+        else if tablea2 eq 1 then do;
+            * Step 2: Always Planned Diagnoses;
+            planned = 1;
+        end;
+        else if planned_1 = 1 and excldx = 1 then do;
+            planned = 0;
+        end;
+        else if planned_1 = 1 and excldx = 0 then do;
+            planned = 1;
+        end;
+    
+        *--------------------------------------------------------------;
+    
+        * Add Facility Planned <RTI>;
+        if readmission_type = "Psych" then do;
+            * All Psych is planned;
+            planned    = 1;
+            plan_psych = 1;
+        end;
+    end; * if readmit_ipps2 = 1;
+    
+    if readmit_ipps2 = 0 then readmit_ipps_up = 0;
+    else if readmit_ipps2 = 1 and planned = 1 then readmit_ipps_up = 0;
+    else if readmit_ipps2 = 1 and planned = 0 then readmit_ipps_up = 1;
+    
+    if readmit_ipps2=1 then unplanned_for_report = readmit_ipps_up;
+    else if readmit_ipps2=0 then unplanned_for_report = .;
+
+    
+    *------------------------------------------------------------------;
+
+    drop
+        _:
+        ;
+        
+
+    label
+        plan_psych      = "Always planned (psych readmission)"
+        planned         = "Planned Readmission"
+        planned_1       = "Potentially Planned Procedure"
+        planned_2       = "Always Planned Procedure"
+        tablea1         = "Appendix Table A1: Procedure Categories that are Always Planned regardless of Diagnosis"
+        tablea2         = "Appendix Table A2 Diagnosis Categories That Are Always Planned Regardless of Procedure"
+        tablea3         = "Appendix Table a3. List of Potentially Planned Procedure Categories"
+        tablea4         = "Appendix Table A4. Acute Diagnosis Categories That Disqualify a Readmission from Being Considered Planned"
+        tablea5         = "Appendix Table A5. Additions to List of Planned Readmissions Currently Used in the Hospital-Wide Readmission Measure"
+        excldx          = "AHRQ CCS acute diagnosis based exclusions for planned"
+        readmit_ipps_up = "Unplanned readmission"
+        ;
+run;
+
+
+
+proc freq data=foiadata.foia_icd9; 
+tables SNF_ADM_YEAR*(readmit_ipps2 readmit_ipps_up)/nocol nocum; run;
+
+
+
