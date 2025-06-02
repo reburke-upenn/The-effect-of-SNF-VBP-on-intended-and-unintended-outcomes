@@ -1,0 +1,1131 @@
+*****************************************************************************************************************************************
+*  Project Name :           SNF DID Analysis				 																			*
+*  Principal Investigator : Burke																										*
+*  Name of Program :        1_MEDPAR_Cohort.sas																							*
+*  Programmer :             J Heintz       
+*  Proofread : 				F Hutchins 8/24/24
+*  Original Code Source:	CMS, FOIA Number: 042320237001  Date: 02/26/2024                                                        							*
+*  Start Date :             March 26th, 2024	                                                               							*
+*  Program Description :	Apply FOIA Code 00-03 to identify MedPAR-based cohort of SNF patients	
+
+This program is adapted directly from code provided by CMS 
+via the following Freedom of Information Act (FOIA) request: 
+
+Control/ID Number: 042320237001
+Request Submitted to CMS: 04/26/2023
+Records Released: 02/26/2024
+Subject: Risk-Standardized Readmissions Rates
+Submitting organization: University of Pennsylvania			
+
+Specific files names from the FOIA are included in notes						
+*****************************************************************************************************************************************;
+
+*Run library locations;
+%include '[filepath to code writing library locations]';
+
+*************************************************
+***STEP 1. Bring in Inpatient Records (MEDPAR)***
+*************************************************;
+%let add_var=%str(
+bene_id, clm_type, age_cnt, ADMSNDT, DSCHRGDT, LOSCNT, DSTNTNCD, PRVDR_NUM, SPCLUNIT,
+ICUINDCD, SSLSSNF, ICARECNT, DEATHDT, DEATHCD, /*PRVSTATE,*/ ORG_NPI_NUM, PRCDRSW,
+PRCDRCNT, PRCDR_CD1, PRCDR_CD2, PRCDR_CD3, PRCDR_CD4, PRCDR_CD5, PRCDR_CD6, 
+PRCDR_CD7, PRCDR_CD8, PRCDR_CD9, PRCDR_CD10, PRCDR_CD11, PRCDR_CD12, PRCDR_CD13, 
+PRCDR_CD14, PRCDR_CD15, PRCDR_CD16, PRCDR_CD17, PRCDR_CD18, PRCDR_CD19, 
+PRCDR_CD20, PRCDR_CD21, PRCDR_CD22, PRCDR_CD23, PRCDR_CD24, PRCDR_CD25, 
+SRGCL_PRCDR_VRSN_CD, SRGCL_PRCDR_VRSN_CD_1, SRGCL_PRCDR_VRSN_CD_2, 
+SRGCL_PRCDR_VRSN_CD_3, SRGCL_PRCDR_VRSN_CD_4, SRGCL_PRCDR_VRSN_CD_5, 
+SRGCL_PRCDR_VRSN_CD_6, SRGCL_PRCDR_VRSN_CD_7, SRGCL_PRCDR_VRSN_CD_8, 
+SRGCL_PRCDR_VRSN_CD_9, SRGCL_PRCDR_VRSN_CD_10, SRGCL_PRCDR_VRSN_CD_11, 
+SRGCL_PRCDR_VRSN_CD_12, SRGCL_PRCDR_VRSN_CD_13, SRGCL_PRCDR_VRSN_CD_14, 
+SRGCL_PRCDR_VRSN_CD_15, SRGCL_PRCDR_VRSN_CD_16, SRGCL_PRCDR_VRSN_CD_17, 
+SRGCL_PRCDR_VRSN_CD_18, SRGCL_PRCDR_VRSN_CD_19, SRGCL_PRCDR_VRSN_CD_20, 
+SRGCL_PRCDR_VRSN_CD_21, SRGCL_PRCDR_VRSN_CD_22, SRGCL_PRCDR_VRSN_CD_23, 
+SRGCL_PRCDR_VRSN_CD_24, SRGCL_PRCDR_VRSN_CD_25, 
+DGNS_CD01,	DGNS_CD02,	DGNS_CD03,	DGNS_CD04,	DGNS_CD05,	DGNS_CD06,	DGNS_CD07,	DGNS_CD08,	DGNS_CD09,	DGNS_CD10,	DGNS_CD11,	DGNS_CD12,	DGNS_CD13,	DGNS_CD14,	DGNS_CD15,	DGNS_CD16,	DGNS_CD17,	DGNS_CD18,	DGNS_CD19,	DGNS_CD20,	DGNS_CD21,	DGNS_CD22,	DGNS_CD23,	DGNS_CD24,	DGNS_CD25,
+DGNS_VRSN_CD_1,	DGNS_VRSN_CD_2,	DGNS_VRSN_CD_3,	DGNS_VRSN_CD_4,	DGNS_VRSN_CD_5,	DGNS_VRSN_CD_6,	DGNS_VRSN_CD_7,	DGNS_VRSN_CD_8,	DGNS_VRSN_CD_9,	DGNS_VRSN_CD_10,	DGNS_VRSN_CD_11,	DGNS_VRSN_CD_12,	DGNS_VRSN_CD_13,	DGNS_VRSN_CD_14,	DGNS_VRSN_CD_15,	DGNS_VRSN_CD_16,	DGNS_VRSN_CD_17,	DGNS_VRSN_CD_18,	DGNS_VRSN_CD_19,	DGNS_VRSN_CD_20,	DGNS_VRSN_CD_21,	DGNS_VRSN_CD_22,	DGNS_VRSN_CD_23,	DGNS_VRSN_CD_24,	DGNS_VRSN_CD_25
+, UTIL_DAY AS UTLZTN_DAY_CNT, PMT_AMT AS MDCR_PMT_AMT, STATE_CD as PRVDR_STATE_CD, CNTY_CD AS BENE_RSDNC_SSA_CNTY_CD,  SEX AS BENE_SEX_CD, EXHST_DT AS BENE_MDCR_BNFT_EXHST_DT, BIC AS BENE_IDENT_CD, DSCHRGCD AS BENE_DSCHRG_STUS_CD, DRG_CD, ACRTNDT AS LTST_CLM_ACRTN_DT, DGNSCNT AS DGNS_CD_CNT, CRNRYDAY AS CRNRY_CARE_DAY_CNT 
+);
+
+
+proc sql;
+create table all_hospital_11_19 as
+select &add_var from medpar.mp100mod_2011 AS A
+outer union corr select &add_var from medpar.mp100mod_2012 AS B
+outer union corr select &add_var from medpar.mp100mod_2013 AS C
+outer union corr select &add_var from medpar.mp100mod_2014 AS D
+outer union corr select &add_var from medpar.mp100mod_2015 AS e 
+outer union corr select &add_var from medpar.mp100mod_2016 AS f
+outer union corr select &add_var from medpar.mp100mod_2017 AS g
+outer union corr select &add_var from medpar.mp100mod_2018 AS h
+outer union corr select &add_var from medpar.mp100mod_2019 AS i
+;
+QUIT;*158620825 ;
+
+PROC SQL;
+create table all_hospital_20_21 as
+select BENE_ID,	ORG_NPI_NUM,	PRVDR_NUM,	ADMSN_DT AS ADMSNDT,	BENE_AGE_CNT AS age_cnt,	BENE_DEATH_DT AS DEATHDT,	BENE_DEATH_DT_VRFY_CD AS DEATHCD,	DGNS_1_CD AS DGNS_CD01,	DGNS_10_CD AS DGNS_CD10,	DGNS_11_CD AS DGNS_CD11,	DGNS_12_CD AS DGNS_CD12,	DGNS_13_CD AS DGNS_CD13,	DGNS_14_CD AS DGNS_CD14,	DGNS_15_CD AS DGNS_CD15,	DGNS_16_CD AS DGNS_CD16,	DGNS_17_CD AS DGNS_CD17,	DGNS_18_CD AS DGNS_CD18,	DGNS_19_CD AS DGNS_CD19,	DGNS_2_CD AS DGNS_CD02,	DGNS_20_CD AS DGNS_CD20,	DGNS_21_CD AS DGNS_CD21,	DGNS_22_CD AS DGNS_CD22,	DGNS_23_CD AS DGNS_CD23,	DGNS_24_CD AS DGNS_CD24,	DGNS_25_CD AS DGNS_CD25,	DGNS_3_CD AS DGNS_CD03,	DGNS_4_CD AS DGNS_CD04,	DGNS_5_CD AS DGNS_CD05,	DGNS_6_CD AS DGNS_CD06,	DGNS_7_CD AS DGNS_CD07,	DGNS_8_CD AS DGNS_CD08,	DGNS_9_CD AS DGNS_CD09,
+	DGNS_VRSN_CD_1 AS DGNS_VRSN_CD_1,	DGNS_VRSN_CD_10 AS DGNS_VRSN_CD_10,	DGNS_VRSN_CD_11 AS DGNS_VRSN_CD_11,	DGNS_VRSN_CD_12 AS DGNS_VRSN_CD_12,	DGNS_VRSN_CD_13 AS DGNS_VRSN_CD_13,	DGNS_VRSN_CD_14 AS DGNS_VRSN_CD_14,	DGNS_VRSN_CD_15 AS DGNS_VRSN_CD_15,	DGNS_VRSN_CD_16 AS DGNS_VRSN_CD_16,	DGNS_VRSN_CD_17 AS DGNS_VRSN_CD_17,	DGNS_VRSN_CD_18 AS DGNS_VRSN_CD_18,	DGNS_VRSN_CD_19 AS DGNS_VRSN_CD_19,	DGNS_VRSN_CD_2 AS DGNS_VRSN_CD_2,	DGNS_VRSN_CD_20 AS DGNS_VRSN_CD_20,	DGNS_VRSN_CD_21 AS DGNS_VRSN_CD_21,	DGNS_VRSN_CD_22 AS DGNS_VRSN_CD_22,	DGNS_VRSN_CD_23 AS DGNS_VRSN_CD_23,	DGNS_VRSN_CD_24 AS DGNS_VRSN_CD_24,	DGNS_VRSN_CD_25 AS DGNS_VRSN_CD_25,	DGNS_VRSN_CD_3 AS DGNS_VRSN_CD_3,	DGNS_VRSN_CD_4 AS DGNS_VRSN_CD_4,	DGNS_VRSN_CD_5 AS DGNS_VRSN_CD_5,	DGNS_VRSN_CD_6 AS DGNS_VRSN_CD_6,	DGNS_VRSN_CD_7 AS DGNS_VRSN_CD_7,	DGNS_VRSN_CD_8 AS DGNS_VRSN_CD_8,	DGNS_VRSN_CD_9 AS DGNS_VRSN_CD_9,	DSCHRG_DSTNTN_CD AS DSTNTNCD,	DSCHRG_DT AS DSCHRGDT,	ICU_IND_CD AS ICUINDCD,	INTNSV_CARE_DAY_CNT AS ICARECNT,	LOS_DAY_CNT AS LOSCNT,	NCH_CLM_TYPE_CD AS clm_type,	SS_LS_SNF_IND_CD AS SSLSSNF,
+	PRVDR_NUM_SPCL_UNIT_CD AS SPCLUNIT,	SRGCL_PRCDR_1_CD AS PRCDR_CD1,	SRGCL_PRCDR_10_CD AS PRCDR_CD10,	SRGCL_PRCDR_11_CD AS PRCDR_CD11,	SRGCL_PRCDR_12_CD AS PRCDR_CD12,	SRGCL_PRCDR_13_CD AS PRCDR_CD13,	SRGCL_PRCDR_14_CD AS PRCDR_CD14,	SRGCL_PRCDR_15_CD AS PRCDR_CD15,	SRGCL_PRCDR_16_CD AS PRCDR_CD16,	SRGCL_PRCDR_17_CD AS PRCDR_CD17,	SRGCL_PRCDR_18_CD AS PRCDR_CD18,	SRGCL_PRCDR_19_CD AS PRCDR_CD19,	SRGCL_PRCDR_2_CD AS PRCDR_CD2,	SRGCL_PRCDR_20_CD AS PRCDR_CD20,	SRGCL_PRCDR_21_CD AS PRCDR_CD21,	SRGCL_PRCDR_22_CD AS PRCDR_CD22,	SRGCL_PRCDR_23_CD AS PRCDR_CD23,	SRGCL_PRCDR_24_CD AS PRCDR_CD24,	SRGCL_PRCDR_25_CD AS PRCDR_CD25,	SRGCL_PRCDR_3_CD AS PRCDR_CD3,	SRGCL_PRCDR_4_CD AS PRCDR_CD4,	SRGCL_PRCDR_5_CD AS PRCDR_CD5,	SRGCL_PRCDR_6_CD AS PRCDR_CD6,	SRGCL_PRCDR_7_CD AS PRCDR_CD7,	SRGCL_PRCDR_8_CD AS PRCDR_CD8,	SRGCL_PRCDR_9_CD AS PRCDR_CD9,	SRGCL_PRCDR_CD_CNT AS PRCDRCNT,	SRGCL_PRCDR_IND_SW AS PRCDRSW,	SRGCL_PRCDR_VRSN_CD AS SRGCL_PRCDR_VRSN_CD,	SRGCL_PRCDR_VRSN_CD_1 AS SRGCL_PRCDR_VRSN_CD_1,	SRGCL_PRCDR_VRSN_CD_10 AS SRGCL_PRCDR_VRSN_CD_10,	SRGCL_PRCDR_VRSN_CD_11 AS SRGCL_PRCDR_VRSN_CD_11,
+	SRGCL_PRCDR_VRSN_CD_12 AS SRGCL_PRCDR_VRSN_CD_12,	SRGCL_PRCDR_VRSN_CD_13 AS SRGCL_PRCDR_VRSN_CD_13,	SRGCL_PRCDR_VRSN_CD_14 AS SRGCL_PRCDR_VRSN_CD_14,	SRGCL_PRCDR_VRSN_CD_15 AS SRGCL_PRCDR_VRSN_CD_15,	SRGCL_PRCDR_VRSN_CD_16 AS SRGCL_PRCDR_VRSN_CD_16,	SRGCL_PRCDR_VRSN_CD_17 AS SRGCL_PRCDR_VRSN_CD_17,	SRGCL_PRCDR_VRSN_CD_18 AS SRGCL_PRCDR_VRSN_CD_18,	SRGCL_PRCDR_VRSN_CD_19 AS SRGCL_PRCDR_VRSN_CD_19,	SRGCL_PRCDR_VRSN_CD_2 AS SRGCL_PRCDR_VRSN_CD_2,	SRGCL_PRCDR_VRSN_CD_20 AS SRGCL_PRCDR_VRSN_CD_20,	SRGCL_PRCDR_VRSN_CD_21 AS SRGCL_PRCDR_VRSN_CD_21,	SRGCL_PRCDR_VRSN_CD_22 AS SRGCL_PRCDR_VRSN_CD_22,	SRGCL_PRCDR_VRSN_CD_23 AS SRGCL_PRCDR_VRSN_CD_23,	SRGCL_PRCDR_VRSN_CD_24 AS SRGCL_PRCDR_VRSN_CD_24,	SRGCL_PRCDR_VRSN_CD_25 AS SRGCL_PRCDR_VRSN_CD_25,	SRGCL_PRCDR_VRSN_CD_3 AS SRGCL_PRCDR_VRSN_CD_3,	SRGCL_PRCDR_VRSN_CD_4 AS SRGCL_PRCDR_VRSN_CD_4,	SRGCL_PRCDR_VRSN_CD_5 AS SRGCL_PRCDR_VRSN_CD_5,	SRGCL_PRCDR_VRSN_CD_6 AS SRGCL_PRCDR_VRSN_CD_6,	SRGCL_PRCDR_VRSN_CD_7 AS SRGCL_PRCDR_VRSN_CD_7,	SRGCL_PRCDR_VRSN_CD_8 AS SRGCL_PRCDR_VRSN_CD_8,	SRGCL_PRCDR_VRSN_CD_9 AS SRGCL_PRCDR_VRSN_CD_9, UTLZTN_DAY_CNT, MDCR_PMT_AMT, BENE_RSDNC_SSA_STATE_CD as PRVDR_STATE_CD, BENE_RSDNC_SSA_CNTY_CD,  BENE_SEX_CD, BENE_MDCR_BNFT_EXHST_DT, BENE_IDENT_CD, BENE_DSCHRG_STUS_CD, DRG_CD, LTST_CLM_ACRTN_DT, DGNS_CD_CNT, CRNRY_CARE_DAY_CNT
+from cy.MEDPAR_ALL_FILE_2020 AS j 
+outer union corr 
+select BENE_ID,	ORG_NPI_NUM,	PRVDR_NUM,	ADMSN_DT AS ADMSNDT,	BENE_AGE_CNT AS age_cnt,	BENE_DEATH_DT AS DEATHDT,	BENE_DEATH_DT_VRFY_CD AS DEATHCD,	DGNS_1_CD AS DGNS_CD01,	DGNS_10_CD AS DGNS_CD10,	DGNS_11_CD AS DGNS_CD11,	DGNS_12_CD AS DGNS_CD12,	DGNS_13_CD AS DGNS_CD13,	DGNS_14_CD AS DGNS_CD14,	DGNS_15_CD AS DGNS_CD15,	DGNS_16_CD AS DGNS_CD16,	DGNS_17_CD AS DGNS_CD17,	DGNS_18_CD AS DGNS_CD18,	DGNS_19_CD AS DGNS_CD19,	DGNS_2_CD AS DGNS_CD02,	DGNS_20_CD AS DGNS_CD20,	DGNS_21_CD AS DGNS_CD21,	DGNS_22_CD AS DGNS_CD22,	DGNS_23_CD AS DGNS_CD23,	DGNS_24_CD AS DGNS_CD24,	DGNS_25_CD AS DGNS_CD25,	DGNS_3_CD AS DGNS_CD03,	DGNS_4_CD AS DGNS_CD04,	DGNS_5_CD AS DGNS_CD05,	DGNS_6_CD AS DGNS_CD06,	DGNS_7_CD AS DGNS_CD07,	DGNS_8_CD AS DGNS_CD08,	DGNS_9_CD AS DGNS_CD09,
+	DGNS_VRSN_CD_1 AS DGNS_VRSN_CD_1,	DGNS_VRSN_CD_10 AS DGNS_VRSN_CD_10,	DGNS_VRSN_CD_11 AS DGNS_VRSN_CD_11,	DGNS_VRSN_CD_12 AS DGNS_VRSN_CD_12,	DGNS_VRSN_CD_13 AS DGNS_VRSN_CD_13,	DGNS_VRSN_CD_14 AS DGNS_VRSN_CD_14,	DGNS_VRSN_CD_15 AS DGNS_VRSN_CD_15,	DGNS_VRSN_CD_16 AS DGNS_VRSN_CD_16,	DGNS_VRSN_CD_17 AS DGNS_VRSN_CD_17,	DGNS_VRSN_CD_18 AS DGNS_VRSN_CD_18,	DGNS_VRSN_CD_19 AS DGNS_VRSN_CD_19,	DGNS_VRSN_CD_2 AS DGNS_VRSN_CD_2,	DGNS_VRSN_CD_20 AS DGNS_VRSN_CD_20,	DGNS_VRSN_CD_21 AS DGNS_VRSN_CD_21,	DGNS_VRSN_CD_22 AS DGNS_VRSN_CD_22,	DGNS_VRSN_CD_23 AS DGNS_VRSN_CD_23,	DGNS_VRSN_CD_24 AS DGNS_VRSN_CD_24,	DGNS_VRSN_CD_25 AS DGNS_VRSN_CD_25,	DGNS_VRSN_CD_3 AS DGNS_VRSN_CD_3,	DGNS_VRSN_CD_4 AS DGNS_VRSN_CD_4,	DGNS_VRSN_CD_5 AS DGNS_VRSN_CD_5,	DGNS_VRSN_CD_6 AS DGNS_VRSN_CD_6,	DGNS_VRSN_CD_7 AS DGNS_VRSN_CD_7,	DGNS_VRSN_CD_8 AS DGNS_VRSN_CD_8,	DGNS_VRSN_CD_9 AS DGNS_VRSN_CD_9,	DSCHRG_DSTNTN_CD AS DSTNTNCD,	DSCHRG_DT AS DSCHRGDT,	ICU_IND_CD AS ICUINDCD,	INTNSV_CARE_DAY_CNT AS ICARECNT,	LOS_DAY_CNT AS LOSCNT,	NCH_CLM_TYPE_CD AS clm_type,	SS_LS_SNF_IND_CD AS SSLSSNF,
+	PRVDR_NUM_SPCL_UNIT_CD AS SPCLUNIT,	SRGCL_PRCDR_1_CD AS PRCDR_CD1,	SRGCL_PRCDR_10_CD AS PRCDR_CD10,	SRGCL_PRCDR_11_CD AS PRCDR_CD11,	SRGCL_PRCDR_12_CD AS PRCDR_CD12,	SRGCL_PRCDR_13_CD AS PRCDR_CD13,	SRGCL_PRCDR_14_CD AS PRCDR_CD14,	SRGCL_PRCDR_15_CD AS PRCDR_CD15,	SRGCL_PRCDR_16_CD AS PRCDR_CD16,	SRGCL_PRCDR_17_CD AS PRCDR_CD17,	SRGCL_PRCDR_18_CD AS PRCDR_CD18,	SRGCL_PRCDR_19_CD AS PRCDR_CD19,	SRGCL_PRCDR_2_CD AS PRCDR_CD2,	SRGCL_PRCDR_20_CD AS PRCDR_CD20,	SRGCL_PRCDR_21_CD AS PRCDR_CD21,	SRGCL_PRCDR_22_CD AS PRCDR_CD22,	SRGCL_PRCDR_23_CD AS PRCDR_CD23,	SRGCL_PRCDR_24_CD AS PRCDR_CD24,	SRGCL_PRCDR_25_CD AS PRCDR_CD25,	SRGCL_PRCDR_3_CD AS PRCDR_CD3,	SRGCL_PRCDR_4_CD AS PRCDR_CD4,	SRGCL_PRCDR_5_CD AS PRCDR_CD5,	SRGCL_PRCDR_6_CD AS PRCDR_CD6,	SRGCL_PRCDR_7_CD AS PRCDR_CD7,	SRGCL_PRCDR_8_CD AS PRCDR_CD8,	SRGCL_PRCDR_9_CD AS PRCDR_CD9,	SRGCL_PRCDR_CD_CNT AS PRCDRCNT,	SRGCL_PRCDR_IND_SW AS PRCDRSW,	SRGCL_PRCDR_VRSN_CD AS SRGCL_PRCDR_VRSN_CD,	SRGCL_PRCDR_VRSN_CD_1 AS SRGCL_PRCDR_VRSN_CD_1,	SRGCL_PRCDR_VRSN_CD_10 AS SRGCL_PRCDR_VRSN_CD_10,	SRGCL_PRCDR_VRSN_CD_11 AS SRGCL_PRCDR_VRSN_CD_11,
+	SRGCL_PRCDR_VRSN_CD_12 AS SRGCL_PRCDR_VRSN_CD_12,	SRGCL_PRCDR_VRSN_CD_13 AS SRGCL_PRCDR_VRSN_CD_13,	SRGCL_PRCDR_VRSN_CD_14 AS SRGCL_PRCDR_VRSN_CD_14,	SRGCL_PRCDR_VRSN_CD_15 AS SRGCL_PRCDR_VRSN_CD_15,	SRGCL_PRCDR_VRSN_CD_16 AS SRGCL_PRCDR_VRSN_CD_16,	SRGCL_PRCDR_VRSN_CD_17 AS SRGCL_PRCDR_VRSN_CD_17,	SRGCL_PRCDR_VRSN_CD_18 AS SRGCL_PRCDR_VRSN_CD_18,	SRGCL_PRCDR_VRSN_CD_19 AS SRGCL_PRCDR_VRSN_CD_19,	SRGCL_PRCDR_VRSN_CD_2 AS SRGCL_PRCDR_VRSN_CD_2,	SRGCL_PRCDR_VRSN_CD_20 AS SRGCL_PRCDR_VRSN_CD_20,	SRGCL_PRCDR_VRSN_CD_21 AS SRGCL_PRCDR_VRSN_CD_21,	SRGCL_PRCDR_VRSN_CD_22 AS SRGCL_PRCDR_VRSN_CD_22,	SRGCL_PRCDR_VRSN_CD_23 AS SRGCL_PRCDR_VRSN_CD_23,	SRGCL_PRCDR_VRSN_CD_24 AS SRGCL_PRCDR_VRSN_CD_24,	SRGCL_PRCDR_VRSN_CD_25 AS SRGCL_PRCDR_VRSN_CD_25,	SRGCL_PRCDR_VRSN_CD_3 AS SRGCL_PRCDR_VRSN_CD_3,	SRGCL_PRCDR_VRSN_CD_4 AS SRGCL_PRCDR_VRSN_CD_4,	SRGCL_PRCDR_VRSN_CD_5 AS SRGCL_PRCDR_VRSN_CD_5,	SRGCL_PRCDR_VRSN_CD_6 AS SRGCL_PRCDR_VRSN_CD_6,	SRGCL_PRCDR_VRSN_CD_7 AS SRGCL_PRCDR_VRSN_CD_7,	SRGCL_PRCDR_VRSN_CD_8 AS SRGCL_PRCDR_VRSN_CD_8,	SRGCL_PRCDR_VRSN_CD_9 AS SRGCL_PRCDR_VRSN_CD_9, UTLZTN_DAY_CNT, MDCR_PMT_AMT, BENE_RSDNC_SSA_STATE_CD as PRVDR_STATE_CD, BENE_RSDNC_SSA_CNTY_CD,  BENE_SEX_CD, BENE_MDCR_BNFT_EXHST_DT, BENE_IDENT_CD, BENE_DSCHRG_STUS_CD, DRG_CD, LTST_CLM_ACRTN_DT, DGNS_CD_CNT, CRNRY_CARE_DAY_CNT
+from CY.MEDPAR_ALL_FILE_2021 AS k 
+; quit;*32645135    ; 
+
+DATA all_hospital_20_21B; SET all_hospital_20_21;
+DSTNTNCD_NUM=INPUT(DSTNTNCD,8.);
+DRG_CD_NUM=INPUT(DRG_CD,8.);
+DROP DSTNTNCD DRG_CD;
+RENAME DSTNTNCD_NUM=DSTNTNCD;
+RENAME DRG_CD_NUM=DRG_CD;
+RUN; *32645135 ;
+
+PROC SQL;
+CREATE TABLE all_hospital_11_21 AS
+SELECT * FROM all_hospital_11_19
+outer union corr
+SELECT * FROM all_hospital_20_21B
+; QUIT; *191265960   ;
+
+DATA FOIADATA.all_hospital_11_21; SET all_hospital_11_21; RUN; *191265960 ;
+
+
+*********************************************
+***Step 2. Classify hospitalization type from FOIA code: PROVTYPE.sas***
+*********************************************; 
+
+DATA hosp_type; SET FOIADATA.all_hospital_11_21;
+    attrib PROV_TYPE length=$10;
+
+    PROV_TYPE=" ";
+
+    if      "0001" <= substr(PRVDR_NUM,3,4) <= "0879" then PROV_TYPE = "IPPS      ";
+    else if "0880" <= substr(PRVDR_NUM,3,4) <= "0899" then PROV_TYPE = "IPPS      ";
+    else if "0900" <= substr(PRVDR_NUM,3,4) <= "0999" then PROV_TYPE = "Med complx";
+    else if "1000" <= substr(PRVDR_NUM,3,4) <= "1199" then PROV_TYPE = "FQHC      ";
+    else if "1200" <= substr(PRVDR_NUM,3,4) <= "1224" then PROV_TYPE = "Alcoh/drug";
+    else if "1225" <= substr(PRVDR_NUM,3,4) <= "1299" then PROV_TYPE = "IPPS      ";
+    else if "1300" <= substr(PRVDR_NUM,3,4) <= "1399" then PROV_TYPE = "IPPS      ";
+    else if "1400" <= substr(PRVDR_NUM,3,4) <= "1499" then PROV_TYPE = "CMHC      ";
+    else if "1500" <= substr(PRVDR_NUM,3,4) <= "1799" then PROV_TYPE = "Hospice   ";
+    else if "1800" <= substr(PRVDR_NUM,3,4) <= "1989" then PROV_TYPE = "FQHC      ";
+    else if "1990" <= substr(PRVDR_NUM,3,4) <= "1999" then PROV_TYPE = "RNHCI     ";
+    else if "2000" <= substr(PRVDR_NUM,3,4) <= "2299" then PROV_TYPE = "LTCH      ";
+    else if "2300" <= substr(PRVDR_NUM,3,4) <= "2999" then PROV_TYPE = "Renal     ";
+    else if "3025" <= substr(PRVDR_NUM,3,4) <= "3099" then PROV_TYPE = "IRF       ";
+    else if "3100 " <=substr(PRVDR_NUM,3,4) <= "3199" then PROV_TYPE = "HHA       ";
+    else if "3200 " <=substr(PRVDR_NUM,3,4) <= "3299" then PROV_TYPE = "CORF      ";
+    else if "3300 " <=substr(PRVDR_NUM,3,4) <= "3399" then PROV_TYPE = "Childrens ";
+    else if "3400 " <=substr(PRVDR_NUM,3,4) <= "3499" then PROV_TYPE = "Rural hlth";
+    else if "3500 " <=substr(PRVDR_NUM,3,4) <= "3799" then PROV_TYPE = "Renal     ";
+    else if "3800 " <=substr(PRVDR_NUM,3,4) <= "3974" then PROV_TYPE = "Rural hlth";
+    else if "3975 " <=substr(PRVDR_NUM,3,4) <= "3999" then PROV_TYPE = "Rural hlth";
+    else if "4000 " <=substr(PRVDR_NUM,3,4) <= "4499" then PROV_TYPE = "Psych     ";
+    else if "4500 " <=substr(PRVDR_NUM,3,4) <= "4599" then PROV_TYPE = "CORF      ";
+    else if "4600 " <=substr(PRVDR_NUM,3,4) <= "4799" then PROV_TYPE = "CMHC      ";
+    else if "4800 " <=substr(PRVDR_NUM,3,4) <= "4899" then PROV_TYPE = "CORF      ";
+    else if "4900 " <=substr(PRVDR_NUM,3,4) <= "4999" then PROV_TYPE = "CMHC      ";
+    else if "5000 " <=substr(PRVDR_NUM,3,4) <= "6499" then PROV_TYPE = "SNF       ";
+    else if "6500 " <=substr(PRVDR_NUM,3,4) <= "6989" then PROV_TYPE = "CMHC      ";
+    else if "6990 " <=substr(PRVDR_NUM,3,4) <= "6999" then PROV_TYPE = "Christ Sci";
+    else if "7000 " <=substr(PRVDR_NUM,3,4) <= "7299" then PROV_TYPE = "HHA       ";
+    else if "7300 " <=substr(PRVDR_NUM,3,4) <= "7399" then PROV_TYPE = "HHA       ";
+    else if "7400 " <=substr(PRVDR_NUM,3,4) <= "7799" then PROV_TYPE = "HHA       ";
+    else if "7800 " <=substr(PRVDR_NUM,3,4) <= "7999" then PROV_TYPE = "HHA       ";
+    else if "8000 " <=substr(PRVDR_NUM,3,4) <= "8499" then PROV_TYPE = "HHA       ";
+    else if "8500 " <=substr(PRVDR_NUM,3,4) <= "8899" then PROV_TYPE = "Rural hlth";
+    else if "8900 " <=substr(PRVDR_NUM,3,4) <= "8999" then PROV_TYPE = "Rural hlth";
+    else if "9000 " <=substr(PRVDR_NUM,3,4) <= "9799" then PROV_TYPE = "HHA       ";
+    else if "9800 " <=substr(PRVDR_NUM,3,4) <= "9899" then PROV_TYPE = "Transplant";
+    else PROV_TYPE = substr(PRVDR_NUM,3,4);
+
+    ** Special Unit Code overrides **;
+    if      SPCLUNIT in("U","W","Y","Z") then PROV_TYPE = "SNF       ";
+    else if SPCLUNIT in("M","S")         then PROV_TYPE = "Psych     ";
+    else if SPCLUNIT in("R","T")         then PROV_TYPE = "IRF       ";
+    
+YEAR=YEAR(admsndt);
+RUN; *191265960 ;
+
+****************************************************************************************
+Step 3 - Identifying Embeded stays from code: 01_XREF.SAS
+This also  deletes "near dups"
+****************************************************************************************;
+PROC SORT DATA=hosp_type; by bene_id admsndt DSCHRGDT PRVDR_NUM; RUN; 
+
+*REMOVES ALL STAYS NOT IN "IPPS", "SNF", "Psych", "IRF", "LTCH";
+DATA medpar_keep; SET hosp_type;
+attrib DSCWasMissing length=3.;
+attrib DSC length=4.;
+retain MedPARRecordNumber 0;
+
+if PROV_TYPE IN("IPPS", "SNF", "Psych", "IRF", "LTCH") then DO;
+    MedPARRecordNumber = MedPARRecordNumber + 1; 
+    if (DSCHRGDT = .) then do;
+        DSC = admsndt + LOSCNT;
+        DSCWasMissing = 1;
+    end;    
+    else do;
+        DSC = DSCHRGDT;
+        DSCWasMissing = 0;
+    end;
+	output medpar_keep;
+END;
+format admsndt DSCHRGDT DSC MMDDYY10.;
+
+label 
+    PROV_TYPE          = "Provider type"
+    DSC                = "Imputed discharge date"
+    DSCWasMissing      = "Flag for missing discharge date"
+    MedPARRecordNumber = "A unique number for each saved MedPAR stay"
+    ;
+RUN;*191231334  ;
+proc sort data=medpar_keep;
+    by  BENE_ID admsndt DSC PRVDR_NUM DRG_CD  DSTNTNCD ltst_clm_acrtn_dt;
+RUN;
+
+*SEPERATING "NEAR DUPS" FROM ALL OTHERS;
+data medpar_nodups medpar_near_dups_dropped; set medpar_keep;
+    by  BENE_ID admsndt DSC PRVDR_NUM DRG_CD  DSTNTNCD ltst_clm_acrtn_dt;
+	attrib _NEAR_DUP_DROPPED length=3.;
+
+    /* For records that match on all key vars, keeping latest ltst_clm_acrtn_dt */
+    if last.ltst_clm_acrtn_dt then do;
+        if first.ltst_clm_acrtn_dt and last.ltst_clm_acrtn_dt then
+            _NEAR_DUP_DROPPED = .;
+        else _NEAR_DUP_DROPPED = 0;
+        output medpar_nodups;
+    end;
+    else do;
+        _NEAR_DUP_DROPPED = 1;
+        output medpar_near_dups_dropped;
+    end;
+    label _NEAR_DUP_DROPPED = "Used to count the number of near dups dropped";
+run;*n=191231319 , 15 dups;
+
+data medpar_embed; set medpar_nodups; by bene_id; 
+    attrib EMBEDDED_FLAG length=3.;
+	retain _PREVIOUS_DSC;
+    EMBEDDED_FLAG = 0;
+    if first.BENE_ID then _PREVIOUS_DSC = DSC;
+    else do;
+        if admsndt lt _PREVIOUS_DSC then
+            EMBEDDED_FLAG = 1;
+        _PREVIOUS_DSC = DSC;
+    end;
+    label EMBEDDED_FLAG = "1 indicates an embedded stay";
+    DROP _:;
+RUN;*191231319;
+
+*ONLY EMBEDDED STAYS;
+DATA data_dsc_e; SET medpar_embed(KEEP=BENE_ID admsndt DSC PROV_TYPE EMBEDDED_FLAG MedPARRecordNumber);
+ BY BENE_ID;
+    attrib _PREVIOUS_PROV_TYPE length=$10;
+    attrib _HOLD_DSC_E length=4.;
+    retain
+        _PREVIOUS_MedPARRecordNumber
+        _PREVIOUS_PROV_TYPE
+        ;
+
+    if first.BENE_ID then do;
+        _PREVIOUS_MedPARRecordNumber = MedPARRecordNumber;
+        _PREVIOUS_PROV_TYPE          = PROV_TYPE;
+    end;
+    else do;
+        if PROV_TYPE in ("IPPS", "Psych") and EMBEDDED_FLAG = 1 then do;
+            if _PREVIOUS_PROV_TYPE = "SNF" then do;
+                _HOLD_DSC_E = admsndt;
+
+                output;
+            end;
+        end;
+
+        _PREVIOUS_MedPARRecordNumber = MedPARRecordNumber;
+        _PREVIOUS_PROV_TYPE          = PROV_TYPE;
+    end;
+
+    format _HOLD_DSC_E mmddyy10.;
+RUN;*94235  ;
+PROC SORT DATA=medpar_embed; BY MedPARRecordNumber;RUN;
+PROC SORT DATA=data_dsc_e; BY MedPARRecordNumber;RUN;
+data medpar_data_dsc_e;
+    merge medpar_embed     (in=in1)
+          data_dsc_e (in=in2);
+    by MedPARRecordNumber;
+    if in1;
+run;*191231319  ;
+data medpar_dsc_e
+    check_dsc_e_finder /*(keep=BENE_ID)*/
+    ;
+    set medpar_data_dsc_e;
+
+    if _HOLD_DSC_E ne . then do;
+        DSC_E = _HOLD_DSC_E;
+        output check_dsc_e_finder;
+    end;
+    else DSC_E = DSC;
+
+    output medpar_dsc_e;
+    label DSC_E = "Corrected imputed discharge date" ;
+    format DSC_E mmddyy10.;
+run;
+proc sort data=medpar_dsc_e;
+    by  BENE_ID admsndt DSC PRVDR_NUM  DRG_CD DSTNTNCD ltst_clm_acrtn_dt;
+run;
+DATA FOIADATA.medpar_dsc_e; SET medpar_dsc_e; RUN;
+
+
+
+****************************************************************************************
+STEP 4 APPLYING SNF EXCLUSIONS FROM code: 02_SNFINDEX.SAS
+****************************************************************************************;
+*ALL SNF STAYS;
+DATA SNF_INDEX; SET FOIADATA.medpar_dsc_e;
+attrib _COUNT_SNF_INDEX_ADM	exclude_SNF_utlznDays0	exclude_nopay	exclude_nonUS	exclude_FedHospTransfer	exclude_SNF_AMA	CAH_exclusion	Exclude_unreliable_demog_info	Exclude_already_dead_medpar	exclude_embedded	m0_34	m35_44	m45_54	m55_59	m60_64	m65_69	m70_74	m75_79	m80_84	m85_89	m90_94	m95_GT	w0_34	w35_44	w45_54	w55_59	w60_64	w65_69	w70_74	w75_79	w80_84	w85_89	w90_94	w95_GT length=3.;
+attrib SNF_DGNS_CD01 length=$7;
+    * Only select SNF stays.;
+    if Prov_type = "SNF" then do;
+        * This variable can be dropped by the next program. It is created;
+        * for a data check in a Proc Freq later in this program.;
+        _COUNT_SNF_INDEX_ADM = 1;
+
+        SNF_DGNS_CD01 = DGNS_CD01;
+
+        if UTLZTN_DAY_CNT = 0 then exclude_SNF_utlznDays0 = 1;
+        else exclude_SNF_utlznDays0 = 0;
+       
+        * exclude_nopay = 1 includes 0, less than 0, and missing;
+        if . le MDCR_PMT_AMT lt 1 then exclude_nopay = 1;
+        else exclude_nopay = 0;
+
+        if PRVDR_STATE_CD in 
+            ("","54","56","57","58","59","60","61","62") 
+            or (PRVDR_STATE_CD = "99" and BENE_RSDNC_SSA_CNTY_CD ne "000")
+            then exclude_nonUS = 1;
+        else exclude_nonUS = 0;
+
+        if DSTNTNCD = 43 then exclude_FedHospTransfer = 1; 
+        else exclude_FedHospTransfer = 0;
+
+        if  DSTNTNCD = 7 then exclude_SNF_AMA = 1;
+        else exclude_SNF_AMA = 0;
+      
+        if age_cnt gt 110 or age_cnt lt 18 or (BENE_SEX_CD ne "1" and BENE_SEX_CD ne "2")
+            then Exclude_unreliable_demog_info = 1;
+        else Exclude_unreliable_demog_info = 0;
+
+		*testing for already dead per year;
+	  		IF YEAR=2011 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2011',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2011',MMDDYY10.);
+			END; 
+	 		ELSE IF YEAR=2012 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2012',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2012',MMDDYY10.);
+			END; 
+	  		ELSE IF YEAR=2013 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2013',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2013',MMDDYY10.);
+			END; 
+	 		ELSE IF YEAR=2014 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2014',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2014',MMDDYY10.);
+			END; 
+	  		IF YEAR=2015 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2015',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2015',MMDDYY10.);
+			END; 
+	 		ELSE IF YEAR=2016 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2016',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2016',MMDDYY10.);
+			END; 
+	  		ELSE IF YEAR=2017 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2017',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2017',MMDDYY10.);
+			END; 
+	 		ELSE IF YEAR=2018 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2018',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2018',MMDDYY10.);
+			END; 
+	  		ELSE IF YEAR=2019 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2019',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2019',MMDDYY10.);
+			END; 
+	 		ELSE IF YEAR=2020 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2020',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2020',MMDDYY10.);
+			END; 
+	 		ELSE IF YEAR=2021 THEN DO;
+		        if (. lt DEATHDT lt INPUT('01/01/2021',MMDDYY10.)) then 
+		            Exclude_already_dead_Medpar = 1; else Exclude_already_dead_Medpar = 0; 
+			        * For the above IF statement, a reminder is placed in the SAS log for what the start date is for the target year.;
+		        START_DT1 = INPUT('01/01/2021',MMDDYY10.);
+			END; 
+		
+        if SPCLUNIT = 'Z' then CAH_exclusion = 1;
+        else CAH_exclusion  = 0;
+
+        if EMBEDDED_FLAG = 1 then exclude_embedded = 1;
+        else exclude_embedded = 0;
+       
+        if (BENE_SEX_CD = "1") then do;
+            m0_34  = (0  <= age_cnt <= 34);
+            m35_44 = (35 <= age_cnt <= 44);
+            m45_54 = (45 <= age_cnt <= 54);
+            m55_59 = (55 <= age_cnt <= 59);
+            m60_64 = (60 <= age_cnt <= 64);
+            m65_69 = (65 <= age_cnt <= 69);
+            m70_74 = (70 <= age_cnt <= 74);
+            m75_79 = (75 <= age_cnt <= 79);
+            m80_84 = (80 <= age_cnt <= 84);
+            m85_89 = (85 <= age_cnt <= 89);
+            m90_94 = (90 <= age_cnt <= 94);
+            m95_GT = (age_cnt >= 95);
+            w0_34  = 0;
+            w35_44 = 0;
+            w45_54 = 0;
+            w55_59 = 0;
+            w60_64 = 0;
+            w65_69 = 0;
+            w70_74 = 0;
+            w75_79 = 0;
+            w80_84 = 0;
+            w85_89 = 0;
+            w90_94 = 0;
+            w95_GT = 0;
+        end;
+        else if (bene_sex_cd = "2") then do;
+            m0_34  = 0;
+            m35_44 = 0;
+            m45_54 = 0;
+            m55_59 = 0;
+            m60_64 = 0;
+            m65_69 = 0;
+            m70_74 = 0;
+            m75_79 = 0;
+            m80_84 = 0;
+            m85_89 = 0;
+            m90_94 = 0;
+            m95_GT = 0;
+            w0_34  = (0  <= age_cnt <= 34);
+            w35_44 = (35 <= age_cnt <= 44);
+            w45_54 = (45 <= age_cnt <= 54);
+            w55_59 = (55 <= age_cnt <= 59);
+            w60_64 = (60 <= age_cnt <= 64);
+            w65_69 = (65 <= age_cnt <= 69);
+            w70_74 = (70 <= age_cnt <= 74);
+            w75_79 = (75 <= age_cnt <= 79);
+            w80_84 = (80 <= age_cnt <= 84);
+            w85_89 = (85 <= age_cnt <= 89);
+            w90_94 = (90 <= age_cnt <= 94);
+            w95_GT = (age_cnt >= 95);
+        end;
+
+        output;
+    end;
+
+    rename
+        PRVDR_NUM                = SNF_PRVDR_NUM          
+        ADMSNDT                = SNF_ADMSNDT            
+        DSCHRGDT               = SNF_DSCHRGDT           
+        BENE_DSCHRG_STUS_CD     = SNF_BENE_DSCHRG_STUS_CD
+        DSTNTNCD        = SNF_DSTNTNCD    
+        LOSCNT             = SNF_LOSCNT      
+        UTLZTN_DAY_CNT          = SNF_UTLZTN_DAY_CNT      
+        bene_mdcr_bnft_exhst_dt = SNF_bene_mdcr_bnft_exhst_dt
+        MDCR_PMT_AMT            = SNF_MDCR_PMT_AMT 
+        BENE_SEX_CD             = BENE_SEX_CD          
+        age_cnt            = age_cnt         
+        MedPARRecordNumber      = SNF_MedPARRecordNumber
+       ; 
+
+    label 
+        _COUNT_SNF_INDEX_ADM          = "TEMP variable to count the number of SNF index admissions"
+        clm_type               = "Claim type"
+        bene_id                         = "Beneficiary’s bene_id"
+        BENE_IDENT_CD                 = "Beneficiary’s identifier code"
+        PRVDR_NUM                  = "PRVDR_NUM id"
+        Prov_type                     = "PRVDR_NUM type of the stay (created in SNFRM_01)"
+        DSC                           = "Imputed discharge date (created in SNFRM_01)"
+        DSCWasMissing                 = "Flag for missing discharge date (created in SNFRM_01)" 
+        EMBEDDED_FLAG                 = "Flag for an embedded stay (created in SNFRM_01)"
+        DSC_E                         = "Corrected imputed discharge date (created in SNFRM_01)"
+        ADMSNDT                  = "Admission date of the SNF stay"
+        DSCHRGDT                 = "Discharge date of SNF stay"
+        BENE_DSCHRG_STUS_CD       = "Discharge status of the SNF stay"
+        DSTNTNCD          = "Discharge destination of the SNF stay"
+        LOSCNT               = "Length of stay of the SNF stay"
+        UTLZTN_DAY_CNT            = "Count of utilization days in the SNF stay"
+        Bene_mdcr_bnft_exhst_dt   = "Exhaust date of Medicare benefit"
+        MDCR_PMT_AMT              = "Medicare payment amount for the SNF stay"
+        exclude_SNF_utlznDays0        = "SNF stays with a utilization day count of zero"
+        exclude_nopay                 = "SNF stays where Medicare payment amount is less than 1"
+        exclude_nonUS                 = "SNF stays where care is received outside the US"
+        exclude_FedHospTransfer       = "SNF stays where the beneficiary was transferred to a federal hospital from SNF"
+        exclude_SNF_AMA               = "SNF stays where the beneficiary was discharged against medical advice."
+        CAH_exclusion                 = "SNF stays in a CAH"
+        Exclude_unreliable_demog_info = "SNF stays where the beneficiary has unreliable demographic information"
+        Exclude_already_dead_Medpar   = "SNF stays where the beneficiary has already died"
+        exclude_embedded              = "SNF stays that are embedded"
+        DGNS_CD01                  = "Diagnosis code of SNF stay"
+        m0_34                         = "Male age LT 35"
+        m35_44                        = "Male age 35_44"
+        m45_54                        = "Male age 45_54"
+        m55_59                        = "Male age 55_59"
+        m60_64                        = "Male age 60_64"
+        m65_69                        = "Male age 65_69"
+        m70_74                        = "Male age 70_74"
+        m75_79                        = "Male age 75_79"
+        m80_84                        = "Male age 80_84"
+        m85_89                        = "Male age 85_89"
+        m90_94                        = "Male age 90_94"
+        m95_GT                        = "Male age GT 95"
+        w0_34                         = "Female age LT 35"
+        w35_44                        = "Female age 35_44"
+        w45_54                        = "Female age 45_54"
+        w55_59                        = "Female age 55_59"
+        w60_64                        = "Female age 60_64"
+        w65_69                        = "Female age 65_69"
+        w70_74                        = "Female age 70_74"
+        w75_79                        = "Female age 75_79"
+        w80_84                        = "Female age 80_84"
+        w85_89                        = "Female age 85_89"
+        w90_94                        = "Female age 90_94"
+        w95_GT                        = "Female age GT 95"
+        BENE_SEX_CD            = "Beneficiary sex identifier" 
+        age_cnt           = "Age of beneficiary" 
+        DEATHCD  = "Verification code for beneficiary death date" 
+        DEATHDT          = "Beneficiary death date" 
+        _COUNT_SNF_INDEX_ADM          = "temp count var created in 02, to drop in 03"
+        MedPARRecordNumber        = "unique MedPAR stay # for each SNF" 
+/*         MEDPAR_SNF_MBI                = "SNF stay MBI number"  */
+        ;
+RUN;*28957484 ;
+
+DATA FOIADATA.SNF_INDEX; SET SNF_INDEX; RUN;
+
+*******************************************************************************
+STEP 5 IDENTIFYING PROXIMAL HOSPITALIZATIONS AND EXCLUSIONS 
+from Code: 03_PROX.SAS
+****************************************************************************************;
+*Using best guess to parse conflicting dataset inputs;
+DATA index_snf_admission; SET FOIADATA.SNF_INDEX ;
+rename BENE_ID=SNF_BENE_ID;
+RENAME DSC=SNF_DSC;
+INDEX_SNF_ADM_ID = _N_;
+label INDEX_SNF_ADM_ID = "Unique ID for each index SNF admission";
+RUN;*28957484  ;
+DATA medpar; SET FOIADATA.medpar_dsc_e /*01 FILE OUTPUT*/;
+    _MEDPAR_ID = _N_;
+	label _MEDPAR_ID = "unique ID for each MedPAR admission";
+RUN; *191231319  ; 
+
+proc sql;
+    create table index_snf_adm_prior_prox_finder as
+	SELECT f1.INDEX_SNF_ADM_ID,	f1.SNF_BENE_ID,	f1.SNF_ADMSNDT, f1.SNF_DSCHRGDT, f1.SNF_MedPARRecordNumber,		
+		f2.BENE_ID,	f2.ADMSNDT,	f2.DSC,	f2.PRVDR_NUM,	f2.PROV_TYPE,	f2.DRG_CD,	f2.DSTNTNCD,	
+		/*f2.MedPAR_file,*/	f2.MedPARRecordNumber,	f2.AGE_CNT,	f2.UTLZTN_DAY_CNT,	f2.ltst_clm_acrtn_dt,	/*f2.obsid,*/	
+		f2.DGNS_CD_CNT,	f2.DGNS_CD01,	f2.DGNS_CD02,	f2.DGNS_CD03,	f2.DGNS_CD04,	f2.DGNS_CD05,	f2.DGNS_CD06,	
+		f2.DGNS_CD07,	f2.DGNS_CD08,	f2.DGNS_CD09,	f2.DGNS_CD10,	f2.DGNS_CD11,	f2.DGNS_CD12,	f2.DGNS_CD13,	
+		f2.DGNS_CD14,	f2.DGNS_CD15,	f2.DGNS_CD16,	f2.DGNS_CD17,	f2.DGNS_CD18,	f2.DGNS_CD19,	f2.DGNS_CD20,	
+		f2.DGNS_CD21,	f2.DGNS_CD22,	f2.DGNS_CD23,	f2.DGNS_CD24,	f2.DGNS_CD25,	
+		f2.DGNS_VRSN_CD_1,	f2.DGNS_VRSN_CD_2,	f2.DGNS_VRSN_CD_3,	f2.DGNS_VRSN_CD_4,	f2.DGNS_VRSN_CD_5,	f2.DGNS_VRSN_CD_6,	
+		f2.DGNS_VRSN_CD_7,	f2.DGNS_VRSN_CD_8,	f2.DGNS_VRSN_CD_9,	f2.DGNS_VRSN_CD_10,	f2.DGNS_VRSN_CD_11,	f2.DGNS_VRSN_CD_12,	f2.DGNS_VRSN_CD_13,	
+		f2.DGNS_VRSN_CD_14,	f2.DGNS_VRSN_CD_15,	f2.DGNS_VRSN_CD_16,	f2.DGNS_VRSN_CD_17,	f2.DGNS_VRSN_CD_18,	f2.DGNS_VRSN_CD_19,	f2.DGNS_VRSN_CD_20,	
+		f2.DGNS_VRSN_CD_21,	f2.DGNS_VRSN_CD_22,	f2.DGNS_VRSN_CD_23,	f2.DGNS_VRSN_CD_24,	f2.DGNS_VRSN_CD_25,	
+		f2.PRCDRCNT,	
+		f2.PRCDR_CD1,	f2.PRCDR_CD2,	f2.PRCDR_CD3,	f2.PRCDR_CD4,	f2.PRCDR_CD5,	f2.PRCDR_CD6,	f2.PRCDR_CD7,	
+		f2.PRCDR_CD8,	f2.PRCDR_CD9,	f2.PRCDR_CD10,	f2.PRCDR_CD11,	f2.PRCDR_CD12,	f2.PRCDR_CD13,	f2.PRCDR_CD14,	
+		f2.PRCDR_CD15,	f2.PRCDR_CD16,	f2.PRCDR_CD17,	f2.PRCDR_CD18,	f2.PRCDR_CD19,	f2.PRCDR_CD20,	f2.PRCDR_CD21,	
+		f2.PRCDR_CD22,	f2.PRCDR_CD23,	f2.PRCDR_CD24,	f2.PRCDR_CD25,	f2.LOSCNT,	f2.ICARECNT,	f2.CRNRY_CARE_DAY_CNT,
+		
+		f2.SRGCL_PRCDR_VRSN_CD_1,	f2.SRGCL_PRCDR_VRSN_CD_2,	f2.SRGCL_PRCDR_VRSN_CD_3,	f2.SRGCL_PRCDR_VRSN_CD_4,	f2.SRGCL_PRCDR_VRSN_CD_5,	f2.SRGCL_PRCDR_VRSN_CD_6,	f2.SRGCL_PRCDR_VRSN_CD_7,	
+		f2.SRGCL_PRCDR_VRSN_CD_8,	f2.SRGCL_PRCDR_VRSN_CD_9,	f2.SRGCL_PRCDR_VRSN_CD_10,	f2.SRGCL_PRCDR_VRSN_CD_11,	f2.SRGCL_PRCDR_VRSN_CD_12,	f2.SRGCL_PRCDR_VRSN_CD_13,	f2.SRGCL_PRCDR_VRSN_CD_14,	
+		f2.SRGCL_PRCDR_VRSN_CD_15,	f2.SRGCL_PRCDR_VRSN_CD_16,	f2.SRGCL_PRCDR_VRSN_CD_17,	f2.SRGCL_PRCDR_VRSN_CD_18,	f2.SRGCL_PRCDR_VRSN_CD_19,	f2.SRGCL_PRCDR_VRSN_CD_20,	f2.SRGCL_PRCDR_VRSN_CD_21,	
+		f2.SRGCL_PRCDR_VRSN_CD_22,	f2.SRGCL_PRCDR_VRSN_CD_23,	f2.SRGCL_PRCDR_VRSN_CD_24,	f2.SRGCL_PRCDR_VRSN_CD_25, f2.PRCDRSW
+        from index_snf_admission as f1,
+             medpar as f2 
+        where f1.SNF_BENE_ID = f2.BENE_ID;
+quit;*323310394 ;
+proc sort data=index_snf_adm_prior_prox_finder;
+    by  BENE_ID admsndt DSC PRVDR_NUM  DRG_CD DSTNTNCD ltst_clm_acrtn_dt;
+run;
+
+* Identify prior proximal admission for each SNF index stay.;
+data prior_prox_finder; set index_snf_adm_prior_prox_finder;
+
+    attrib PRIOR_PROXIMAL_STAY	_SNF_admsndt_DSC	GAP	ProxHospDischgDate_GT1	exclude_NoPriorHosp	exclude_ProxUtlztnDays0 length=3.;
+	YEAR=YEAR(SNF_ADMSNDT);
+    exclude_NoPriorHosp = 1;
+
+    if Prov_type in ("IPPS", "Psych") then do;
+        if SNF_admsndt - DSC in (0, 1) then do; 
+            _SNF_admsndt_DSC = SNF_admsndt - DSC;
+
+            * Prior proximal stay flag;
+            PRIOR_PROXIMAL_STAY = 1;
+
+            _PRIOR_PROX_MedPARRecordNumber = MedPARRecordNumber;
+
+            GAP = SNF_admsndt - DSC;
+
+            * Note: This statement will always set ProxHospDischgDate_GT1 = 0;
+            * Because of the above IF statement;
+            if (SNF_admsndt - DSC) gt 1 then ProxHospDischgDate_GT1 = 1;
+            else ProxHospDischgDate_GT1 = 0;
+
+            * exclude_NoPriorHosp is initialized to 1 before this block of code.;
+            * Note: In a later data step in this program, exclude_NoPriorHosp;
+            *       is set to 1 if it is missing.;
+            if ProxHospDischgDate_GT1 = 1 then exclude_NoPriorHosp = 1;  
+            else exclude_NoPriorHosp = 0;
+
+            * Note: UTLZTN_DAY_CNT is renamed to Prox_UTLZTN_DAY_CNT;
+            *       later in this data step.;
+            if UTLZTN_DAY_CNT = 0 then exclude_ProxUtlztnDays0 = 1;
+            else exclude_ProxUtlztnDays0 = 0;
+
+            * Unique number for each potential prior proximal. Will be;
+            * used later to resolve duplicate prior proximals.;
+            _PRIOR_PROXIMAL_ORDER = _N_;
+        end;
+    end;
+
+    if PRIOR_PROXIMAL_STAY = 1 then output;
+
+    drop MedPARRecordNumber;
+	
+    rename
+        admsndt            = Prox_admsndt
+        DSC                 = Prox_DSCHRGDT
+        DGNS_CD_CNT         = Prox_DGNS_CD_CNT
+        DGNS_CD01            = Prox_DGNS_CD01 
+        DGNS_CD02            = Prox_DGNS_CD02 
+        DGNS_CD03            = Prox_DGNS_CD03 
+        DGNS_CD04            = Prox_DGNS_CD04 
+        DGNS_CD05            = Prox_DGNS_CD05 
+        DGNS_CD06            = Prox_DGNS_CD06 
+        DGNS_CD07            = Prox_DGNS_CD07 
+        DGNS_CD08            = Prox_DGNS_CD08 
+        DGNS_CD09            = Prox_DGNS_CD09 
+        DGNS_CD10           = Prox_DGNS_CD10
+        DGNS_CD11           = Prox_DGNS_CD11
+        DGNS_CD12           = Prox_DGNS_CD12
+        DGNS_CD13           = Prox_DGNS_CD13
+        DGNS_CD14           = Prox_DGNS_CD14
+        DGNS_CD15           = Prox_DGNS_CD15
+        DGNS_CD16           = Prox_DGNS_CD16
+        DGNS_CD17           = Prox_DGNS_CD17
+        DGNS_CD18           = Prox_DGNS_CD18
+        DGNS_CD19           = Prox_DGNS_CD19
+        DGNS_CD20           = Prox_DGNS_CD20
+        DGNS_CD21           = Prox_DGNS_CD21
+        DGNS_CD22           = Prox_DGNS_CD22
+        DGNS_CD23           = Prox_DGNS_CD23
+        DGNS_CD24           = Prox_DGNS_CD24
+        DGNS_CD25           = Prox_DGNS_CD25
+        
+        DGNS_VRSN_CD_1            = Prox_DGNS_VRSN_CD_1 
+        DGNS_VRSN_CD_2            = Prox_DGNS_VRSN_CD_2 
+        DGNS_VRSN_CD_3            = Prox_DGNS_VRSN_CD_3 
+        DGNS_VRSN_CD_4            = Prox_DGNS_VRSN_CD_4 
+        DGNS_VRSN_CD_5            = Prox_DGNS_VRSN_CD_5 
+        DGNS_VRSN_CD_6            = Prox_DGNS_VRSN_CD_6 
+        DGNS_VRSN_CD_7            = Prox_DGNS_VRSN_CD_7 
+        DGNS_VRSN_CD_8            = Prox_DGNS_VRSN_CD_8 
+        DGNS_VRSN_CD_9            = Prox_DGNS_VRSN_CD_9 
+        DGNS_VRSN_CD_10           = Prox_DGNS_VRSN_CD_10
+        DGNS_VRSN_CD_11           = Prox_DGNS_VRSN_CD_11
+        DGNS_VRSN_CD_12           = Prox_DGNS_VRSN_CD_12
+        DGNS_VRSN_CD_13           = Prox_DGNS_VRSN_CD_13
+        DGNS_VRSN_CD_14           = Prox_DGNS_VRSN_CD_14
+        DGNS_VRSN_CD_15           = Prox_DGNS_VRSN_CD_15
+        DGNS_VRSN_CD_16           = Prox_DGNS_VRSN_CD_16
+        DGNS_VRSN_CD_17           = Prox_DGNS_VRSN_CD_17
+        DGNS_VRSN_CD_18           = Prox_DGNS_VRSN_CD_18
+        DGNS_VRSN_CD_19           = Prox_DGNS_VRSN_CD_19
+        DGNS_VRSN_CD_20           = Prox_DGNS_VRSN_CD_20
+        DGNS_VRSN_CD_21           = Prox_DGNS_VRSN_CD_21
+        DGNS_VRSN_CD_22           = Prox_DGNS_VRSN_CD_22
+        DGNS_VRSN_CD_23           = Prox_DGNS_VRSN_CD_23
+        DGNS_VRSN_CD_24           = Prox_DGNS_VRSN_CD_24
+        DGNS_VRSN_CD_25           = Prox_DGNS_VRSN_CD_25
+        
+        PRCDRCNT  = Prox_PRCDRCNT
+        PRCDR_CD1     = Prox_PRCDR_CD1 
+        PRCDR_CD2     = Prox_PRCDR_CD2 
+        PRCDR_CD3     = Prox_PRCDR_CD3 
+        PRCDR_CD4     = Prox_PRCDR_CD4 
+        PRCDR_CD5     = Prox_PRCDR_CD5 
+        PRCDR_CD6     = Prox_PRCDR_CD6 
+        PRCDR_CD7     = Prox_PRCDR_CD7 
+        PRCDR_CD8     = Prox_PRCDR_CD8 
+        PRCDR_CD9     = Prox_PRCDR_CD9 
+        PRCDR_CD10    = Prox_PRCDR_CD10
+        PRCDR_CD11    = Prox_PRCDR_CD11
+        PRCDR_CD12    = Prox_PRCDR_CD12
+        PRCDR_CD13    = Prox_PRCDR_CD13
+        PRCDR_CD14    = Prox_PRCDR_CD14
+        PRCDR_CD15    = Prox_PRCDR_CD15
+        PRCDR_CD16    = Prox_PRCDR_CD16
+        PRCDR_CD17    = Prox_PRCDR_CD17
+        PRCDR_CD18    = Prox_PRCDR_CD18
+        PRCDR_CD19    = Prox_PRCDR_CD19
+        PRCDR_CD20    = Prox_PRCDR_CD20
+        PRCDR_CD21    = Prox_PRCDR_CD21
+        PRCDR_CD22    = Prox_PRCDR_CD22
+        PRCDR_CD23    = Prox_PRCDR_CD23
+        PRCDR_CD24    = Prox_PRCDR_CD24
+        PRCDR_CD25    = Prox_PRCDR_CD25
+        LOSCNT         = Prox_LOSCNT 
+        UTLZTN_DAY_CNT      = Prox_UTLZTN_DAY_CNT
+        ICARECNT= Prox_ICARECNT  
+        CRNRY_CARE_DAY_CNT  = Prox_CRNRY_CARE_DAY_CNT
+        PRVDR_NUM            = Prox_PRVDR_NUM 
+        Prov_type           = Prox_Prov_type
+        AGE_CNT        = Prox_MEDPAR_AGE_CNT
+        SRGCL_PRCDR_VRSN_CD_1-SRGCL_PRCDR_VRSN_CD_25=PROX_SRGCL_PRCDR_VRSN_CD_1-PROX_SRGCL_PRCDR_VRSN_CD_25
+        PRCDRSW = PROX_PRCDRSW
+        ;
+
+    label
+        _SNF_admsndt_DSC       = "SNF adm date minus prior proximal dschrg date"
+        _PRIOR_PROXIMAL_ORDER   = "Unique number for each potential prior proximal"
+        _PRIOR_PROX_MedPARRecordNumber = "A unique MedPARRecordNumber for each prior proximal"
+        PRIOR_PROXIMAL_STAY     = "SNF stays with a prior proximal hospital stay"
+        GAP                     = "The gap between hospital discharge date and SNF admission date"
+        ProxHospDischgDate_GT1  = "SNF stays with an admission date before the discharge date of the prior proximal hospital  stay"
+        exclude_NoPriorHosp     = "SNF stays with no prior proximal hospital stay or an admission date before the discharge date of the prior proximal hospital stay"
+        exclude_ProxUtlztnDays0 = "SNF stays where the prior proximal hospital stay has a utilization day count of zero"
+        ;                    
+run;*23186990 ; 
+
+* This sort is used to resolve which stay to select when there is more;
+* than one stay that qualifies as a prior proximal.;
+proc sort data=prior_prox_finder;
+    by  INDEX_SNF_ADM_ID _SNF_admsndt_DSC
+        descending _PRIOR_PROXIMAL_ORDER;
+run;
+
+* When there is more than one stay that qualifies as a prior proximal,;
+* select the one to keep (based on the above sort order.;
+data prior_prox prior_prox_dup_chk;
+    set prior_prox_finder;
+    by INDEX_SNF_ADM_ID;
+
+    if first.INDEX_SNF_ADM_ID then output prior_prox;
+    if not (first.INDEX_SNF_ADM_ID and last.INDEX_SNF_ADM_ID) then 
+        output prior_prox_dup_chk;
+run; *23179105 , 15764 removed;
+
+* No records should be dropped by this sort. Check the log to be sure.;
+* Creates a temporary dataset used to later create the variable MultipleSNFs.;
+proc sort data=prior_prox (keep=BENE_ID SNF_MedPARRecordNumber
+        rename=(SNF_MedPARRecordNumber=MedPARRecordNumber))
+    out=use_for_MultipleSNFs 
+    nodupkey;
+    by  BENE_ID MedPARRecordNumber;
+run;
+
+* Creates a temporary variable, _SNF_has_a_prior_prox, which will be used;
+* later in this program to create other variables.;
+data use_for_MultipleSNFs; set use_for_MultipleSNFs;
+    attrib _SNF_has_a_prior_prox length=3.;
+    _SNF_has_a_prior_prox = 1;
+run;*23179105 ;
+
+* Does another many to many merge with the MedPAR file that contains all;
+* stays for people with index SNF admissions.;
+* This merge is done to place the new prior proximal variables and some;
+* of the SNF index admission variables on the MedPAR stays. The variables;
+* are added to the stays so that new variables can be created from them.;
+proc sql;
+    create table new_variables (drop=SNF_BENE_ID) as
+	SELECT f1.*,	f2.BENE_ID,	f2.admsndt,	f2.DSC,	f2.PRVDR_NUM,	f2.PROV_TYPE,	f2.DRG_CD,	f2.DSTNTNCD,	
+		f2.UTLZTN_DAY_CNT,	f2.MedPARRecordNumber,	f2.DGNS_CD_CNT,	f2.DGNS_CD01,	f2.DGNS_CD02,	f2.DGNS_CD03,	f2.DGNS_CD04,	f2.DGNS_CD05,	f2.DGNS_CD06,	f2.DGNS_CD07,	f2.DGNS_CD08,	f2.DGNS_CD09,	f2.DGNS_CD10,	f2.DGNS_CD11,	f2.DGNS_CD12,	f2.DGNS_CD13,	f2.DGNS_CD14,	f2.DGNS_CD15,	f2.DGNS_CD16,	f2.DGNS_CD17,	f2.DGNS_CD18,	f2.DGNS_CD19,	f2.DGNS_CD20,	f2.DGNS_CD21,	f2.DGNS_CD22,	f2.DGNS_CD23,	f2.DGNS_CD24,	f2.DGNS_CD25,	
+		f2.PRCDRCNT,	f2.PRCDR_CD1,	f2.PRCDR_CD2,	f2.PRCDR_CD3,	f2.PRCDR_CD4,	f2.PRCDR_CD5,	f2.PRCDR_CD6,	f2.PRCDR_CD7,	f2.PRCDR_CD8,	f2.PRCDR_CD9,	f2.PRCDR_CD10,	f2.PRCDR_CD11,	f2.PRCDR_CD12,	f2.PRCDR_CD13,	f2.PRCDR_CD14,	f2.PRCDR_CD15,	f2.PRCDR_CD16,	f2.PRCDR_CD17,	f2.PRCDR_CD18,	f2.PRCDR_CD19,	f2.PRCDR_CD20,	f2.PRCDR_CD21,	f2.PRCDR_CD22,	f2.PRCDR_CD23,	f2.PRCDR_CD24,	f2.PRCDR_CD25,
+		f2.DGNS_VRSN_CD_1,	f2.DGNS_VRSN_CD_2,	f2.DGNS_VRSN_CD_3,	f2.DGNS_VRSN_CD_4,	f2.DGNS_VRSN_CD_5,	f2.DGNS_VRSN_CD_6,	
+		f2.DGNS_VRSN_CD_7,	f2.DGNS_VRSN_CD_8,	f2.DGNS_VRSN_CD_9,	f2.DGNS_VRSN_CD_10,	f2.DGNS_VRSN_CD_11,	f2.DGNS_VRSN_CD_12,	f2.DGNS_VRSN_CD_13,	
+		f2.DGNS_VRSN_CD_14,	f2.DGNS_VRSN_CD_15,	f2.DGNS_VRSN_CD_16,	f2.DGNS_VRSN_CD_17,	f2.DGNS_VRSN_CD_18,	f2.DGNS_VRSN_CD_19,	f2.DGNS_VRSN_CD_20,	
+		f2.DGNS_VRSN_CD_21,	f2.DGNS_VRSN_CD_22,	f2.DGNS_VRSN_CD_23,	f2.DGNS_VRSN_CD_24,	f2.DGNS_VRSN_CD_25,	
+		f2.SRGCL_PRCDR_VRSN_CD_1,	f2.SRGCL_PRCDR_VRSN_CD_2,	f2.SRGCL_PRCDR_VRSN_CD_3,	f2.SRGCL_PRCDR_VRSN_CD_4,	f2.SRGCL_PRCDR_VRSN_CD_5,	f2.SRGCL_PRCDR_VRSN_CD_6,	f2.SRGCL_PRCDR_VRSN_CD_7,	
+		f2.SRGCL_PRCDR_VRSN_CD_8,	f2.SRGCL_PRCDR_VRSN_CD_9,	f2.SRGCL_PRCDR_VRSN_CD_10,	f2.SRGCL_PRCDR_VRSN_CD_11,	f2.SRGCL_PRCDR_VRSN_CD_12,	f2.SRGCL_PRCDR_VRSN_CD_13,	f2.SRGCL_PRCDR_VRSN_CD_14,	
+		f2.SRGCL_PRCDR_VRSN_CD_15,	f2.SRGCL_PRCDR_VRSN_CD_16,	f2.SRGCL_PRCDR_VRSN_CD_17,	f2.SRGCL_PRCDR_VRSN_CD_18,	f2.SRGCL_PRCDR_VRSN_CD_19,	f2.SRGCL_PRCDR_VRSN_CD_20,	f2.SRGCL_PRCDR_VRSN_CD_21,	
+		f2.SRGCL_PRCDR_VRSN_CD_22,	f2.SRGCL_PRCDR_VRSN_CD_23,	f2.SRGCL_PRCDR_VRSN_CD_24,	f2.SRGCL_PRCDR_VRSN_CD_25
+        from prior_prox(drop=DRG_CD DSTNTNCD BENE_ID) as f1,
+             medpar as f2 
+        where f1.SNF_BENE_ID = f2.BENE_ID;
+quit; *257817469  ;
+proc sort data=new_variables; 
+    by  BENE_ID MedPARRecordNumber;
+run;
+data new_variables;
+    merge new_variables        (in=in1)
+          use_for_MultipleSNFs (in=in2);
+    by  BENE_ID MedPARRecordNumber;
+    if in1;
+run;*257817469  ;
+proc sort data=new_variables;
+    by INDEX_SNF_ADM_ID BENE_ID admsndt DSC PRVDR_NUM  DRG_CD DSTNTNCD ltst_clm_acrtn_dt;
+run;
+
+data new_variables2 (keep=INDEX_SNF_ADM_ID YEAR	PRIOR_PROXIMAL_STAY	GAP	ProxHospDischgDate_GT1	exclude_NoPriorHosp	
+					exclude_ProxUtlztnDays0	Prox_DSCHRGDT		MultipleSNFs	Prox_LOS_cat	los1_3	los4_7	los8_14	
+					los14_GT	los15_GT	Prox_Intnsv_care	Prox_crnry_care	anyICUdays_rev	count90_PriorHospStays	
+					count90_PriorHospStays_cat	Prior_0_covid	Prior_1_3_covid	Prior_4_6_covid	Prior_7_9_covid	
+					Prior_GE_10_covid	readmission_type	daysBtwnPriorProx_Readmit	readmit_ipps2	
+					READM_DGNS_CD1-READM_DGNS_CD25	READM_PRCDR_CD1-READM_PRCDR_CD25	READM_DGNS_VRSN_CD1-READM_DGNS_VRSN_CD25 READM_PRCDR_VRSN_CD1-READM_PRCDR_VRSN_CD25
+					PROX_ADMSN	PROX_DSCHRG	PROX_PRCDRSW
+					READM_PRVDR_NUM	READM_ADMSN	READM_DSCHRG		Prox_ADMSNDT	Prox_DSCHRGDT	Prox_MEDPAR_age_cnt	
+					Prox_DGNS_CD_CNT	Prox_DGNS_CD01-Prox_DGNS_CD25 Prox_DGNS_VRSN_CD_1-Prox_DGNS_VRSN_CD_25	Prox_PRCDRCNT	Prox_PRCDR_CD1-Prox_PRCDR_CD25	
+					Prox_LOSCNT		Prox_UTLZTN_DAY_CNT		Prox_ICARECNT	Prox_CRNRY_CARE_DAY_CNT	Prox_PRVDR_NUM	
+					Prox_PROV_TYPE	Coinciding_IRF_LTCH_Def2	/*Exclude_DI_DPI_Def1*/	Exclude_DI_DPI_Def2		
+					_MultipleSNFs_CNT		prox_covid _IPPS_Psych_FLAG prox_covid PROX_SRGCL_PRCDR_VRSN_CD_1-PROX_SRGCL_PRCDR_VRSN_CD_25)
+         /**** this is the dataset of historic stays ****/    
+         HISTORICAL_d90 (keep=INDEX_SNF_ADM_ID DGNS_CD01-DGNS_CD25 hist_covid);
+         * The second output dataset is created for the next programming request.;
+    set new_variables; by INDEX_SNF_ADM_ID;
+
+    * The variables in this data step are created seperately for each;
+    * SNF index stay admission as defined by INDEX_SNF_ADM_ID.;
+    attrib MultipleSNFs	Prox_LOS_cat	los1_3	los4_7	los8_14	los14_GT	los15_GT	Prox_Intnsv_care	Prox_crnry_care	anyICUdays_rev	count90_PriorHospStays	count90_PriorHospStays_cat	Prior_0_covid	Prior_1_3_covid	Prior_4_6_covid	Prior_7_9_covid	Prior_GE_10_covid	daysBtwnPriorProx_Readmit	readmit_ipps2	Coinciding_IRF_LTCH_Def2	/*Exclude_DI_DPI_Def1*/	Exclude_DI_DPI_Def2	_I	_MultipleSNFs_CNT	_IPPS_Psych_FLAG	hist_covid	prox_covid	length=3.;
+    attrib readmission_type length=$10;
+    attrib PROX_ADMSN PROX_DSCHRG READM_ADMSN READM_DSCHRG length=4.;
+    attrib READM_prvdr_num length=$6;
+    attrib READM_DGNS_CD1-READM_DGNS_CD25 READM_PRCDR_CD1-READM_PRCDR_CD25 READM_DGNS_VRSN_CD1-READM_DGNS_VRSN_CD25 READM_PRCDR_VRSN_CD1-READM_PRCDR_VRSN_CD25 length=$7;
+    retain
+        _MultipleSNFs_CNT
+        _IPPS_Psych_FLAG
+        count90_PriorHospStays
+        readmission_type
+        daysBtwnPriorProx_Readmit
+        readmit_ipps2 
+        READM_PRVDR_NUM
+        Coinciding_IRF_LTCH_Def2
+        READM_DGNS_CD1-READM_DGNS_CD25
+        READM_PRCDR_CD1-READM_PRCDR_CD25
+        READM_DGNS_VRSN_CD1-READM_DGNS_VRSN_CD25
+        READM_PRCDR_VRSN_CD1-READM_PRCDR_VRSN_CD25
+        READM_ADMSN
+        READM_DSCHRG;
+
+    array DGNS_CD(*) DGNS_CD01-DGNS_CD25;
+    array PRCDR_CD(*) PRCDR_CD1-PRCDR_CD25;
+    array DGNS_VRSN_CD(*) DGNS_VRSN_CD_1-DGNS_VRSN_CD_25;
+    array SRGCL_PRCDR_VRSN_CD(*) SRGCL_PRCDR_VRSN_CD_1-SRGCL_PRCDR_VRSN_CD_25;
+
+    array READM_DGNS_CD(*) READM_DGNS_CD1-READM_DGNS_CD25;
+    array READM_PRCDR_CD(*) READM_PRCDR_CD1-READM_PRCDR_CD25;
+    array READM_DGNS_VRSN_CD(*) READM_DGNS_VRSN_CD1-READM_DGNS_VRSN_CD25;
+    array READM_PRCDR_VRSN_CD(*) READM_PRCDR_VRSN_CD1-READM_PRCDR_VRSN_CD25;
+
+    /**** adding array for prox dgns codes to look for covid diagnosis ****/
+    array PROX_DGNS_CD(*) PROX_DGNS_CD1-PROX_DGNS_CD25;
+
+
+    * The variables in this IF statement have retain statements.;
+    * Their initial values are set for each unique index SNF stay.;
+    if first.INDEX_SNF_ADM_ID then do;
+        _MultipleSNFs_CNT          = 0;
+        _IPPS_Psych_FLAG           = 0;
+        count90_PriorHospStays    = 0;
+        readmission_type           = "";
+        daysBtwnPriorProx_Readmit  = .;
+        readmit_ipps2              = 0;
+        READM_prvdr_num            = "";
+        Coinciding_IRF_LTCH_Def2   = 0;
+        READM_ADMSN                = .; 
+        READM_DSCHRG               = .;
+
+        do _I = 1 to dim(READM_DGNS_CD);
+            READM_DGNS_CD(_I) = "";
+            READM_PRCDR_CD(_I) = "";
+            READM_DGNS_VRSN_CD(_I) = "";
+            READM_PRCDR_VRSN_CD(_I) = "";
+        end;
+    end;  
+    * End of if first.INDEX_SNF_ADM_ID then do;
+
+
+    * Create a flag (_IPPS_Psych_FLAG) if there is an IPPS or Psych stay;
+    * within 30 days of the discharge of the prior proximal stay.;
+    if PROV_TYPE in ("IPPS","Psych") then do;
+        * The next IF statement is so the prior proximal stay is not counted.;
+        * (MedPARRecordNumber is a unique number for each MedPAR stay.);
+        * (_PRIOR_PROX_MedPARRecordNumber is the MedPARRecordNumber for;
+        * the prior proximal stay.);
+        if MedPARRecordNumber ne _PRIOR_PROX_MedPARRecordNumber then do;
+            if Prox_DSCHRGDT le ADMSNDT le (Prox_DSCHRGDT + 30) then
+                _IPPS_Psych_FLAG = 1;
+        end;
+    end;
+
+    if PROV_TYPE in ("IRF", "LTCH") then do;
+
+        if _IPPS_Psych_FLAG ne 1 then do;
+            if Coinciding_IRF_LTCH_Def2 ne 1 then do;
+                if Prox_DSCHRGDT le ADMSNDT le (Prox_DSCHRGDT + 30) then
+                    Coinciding_IRF_LTCH_Def2 = 1;  
+            end;
+        end;
+    end;
+
+    * If they do not have an IPPS or Psych stay within 30 days of;
+    * the prior proximal discharge and they have a SNF admission 
+    * within 30 days of the prior proximal discharge, increment;
+    * _MultipleSNFs_CNT by 1.;
+    if PROV_TYPE in ("SNF") then do;
+        if Prox_DSCHRGDT le ADMSNDT le (Prox_DSCHRGDT + 30) then do;
+            * IF .. then: Count the index stay admission for the associated prior proximal;
+            * ELSE IF .. THEN: Count additional SNFs.; 
+            if (MedPARRecordNumber = SNF_MedPARRecordNumber) then
+                _MultipleSNFs_CNT = _MultipleSNFs_CNT + 1;
+            else if _IPPS_Psych_FLAG ne 1 then
+                _MultipleSNFs_CNT = _MultipleSNFs_CNT + 1;
+        end;
+    end;
+
+    /**** this section identifies historic stays ****/
+    
+    if PROV_TYPE in ("IPPS","Psych") then do;
+        * Have "IF 0 LE" to include stays that are prior proximal ties.;
+        if 0 le (Prox_DSCHRGDT - DSC) le 90 then do;
+            * Have if MedPARRecordNumber ne _PRIOR_PROX_MedPARRecordNumber; 
+            * to exclude prior proximal stay;
+            if MedPARRecordNumber ne _PRIOR_PROX_MedPARRecordNumber then do;
+                if not((ADMSNDT eq Prox_ADMSNDT) and (DSC eq Prox_DSCHRGDT)) then do;
+
+                    if PROV_TYPE in("IPPS") then count90_PriorHospStays = count90_PriorHospStays + 1;
+
+                    hist_covid=0;
+                    do _I = 1 to dim(DGNS_CD);
+                        if upcase(DGNS_CD(_I)) = "U071" then hist_covid=1;
+                    end;
+                                       
+                    output HISTORICAL_d90;
+                end;    
+            end;
+        end;
+    end;
+
+
+    * Create readmission variables.;
+    if PROV_TYPE in ("IPPS","Psych") then do;
+        if readmission_type = "" then do;
+            if Prox_DSCHRGDT le ADMSNDT then
+                daysBtwnPriorProx_Readmit = ADMSNDT - Prox_DSCHRGDT;
+            * 30 days inclusive meaning 31 days according to Micahs comments in the request.;
+            if (MedPARRecordNumber ne _PRIOR_PROX_MedPARRecordNumber) and
+                (Prox_DSCHRGDT le ADMSNDT le (Prox_DSCHRGDT + 30)) then do;
+                    readmission_type           = PROV_TYPE;
+                    readmit_ipps2              = 1;
+                    READM_ADMSN                = ADMSNDT;
+                    READM_DSCHRG               = DSC;
+                    READM_prvdr_num            = PRVDR_NUM;
+                    do _I = 1 to dim(READM_DGNS_CD);
+                        READM_DGNS_CD(_I)        = DGNS_CD(_I);
+                        READM_PRCDR_CD(_I) = PRCDR_CD(_I);
+						READM_DGNS_VRSN_CD(_I) = DGNS_VRSN_CD(_I);
+						READM_PRCDR_VRSN_CD(_I) = SRGCL_PRCDR_VRSN_CD(_I);
+                    end;
+            end;
+        end;
+    end;
+
+
+    * Save new variables a SNF index admission level;
+    * (one record per index SNF admission).;
+    if last.INDEX_SNF_ADM_ID then do;
+        if _MultipleSNFs_CNT gt 1 then MultipleSNFs = 1;
+        else MultipleSNFs = 0;
+
+        if      1 le Prox_LOSCNT le  3 then Prox_LOS_cat = 1;
+        else if 4 le Prox_LOSCNT le  7 then Prox_LOS_cat = 2;
+        else if 8 le Prox_LOSCNT le 14 then Prox_LOS_cat = 3;
+        else if      Prox_LOSCNT gt 14 then Prox_LOS_cat = 4;
+
+        if Prox_LOS_cat = 1 then los1_3 = 1;
+        else los1_3 = 0;
+
+        if Prox_LOS_cat = 2 then los4_7 = 1;
+        else los4_7 = 0;
+
+        if Prox_LOS_cat = 3 then los8_14 = 1;
+        else los8_14 = 0;
+
+        if Prox_LOS_cat = 4 then do;
+            los14_GT = 1;
+            los15_GT = 1;
+        end;
+        else do;
+            los14_GT = 0;
+            los15_GT = 0;
+        end;
+
+        if Prox_ICARECNT gt 0 then Prox_Intnsv_care = 1;
+        else Prox_Intnsv_care = 0;
+
+        if Prox_CRNRY_CARE_DAY_CNT gt 0 then Prox_crnry_care = 1;
+        else Prox_crnry_care = 0;
+
+        if Prox_Intnsv_care = 1 or Prox_crnry_care = 1 then anyICUdays_rev = 1;
+        else anyICUdays_rev = 0;
+        
+        if           count90_PriorHospStays =  0 then count90_PriorHospStays_cat = 0;
+        else if 1 le count90_PriorHospStays le 3 then count90_PriorHospStays_cat = 1;
+        else if 4 le count90_PriorHospStays le 6 then count90_PriorHospStays_cat = 2;
+        else if 7 le count90_PriorHospStays le 9 then count90_PriorHospStays_cat = 3;
+        else if      count90_PriorHospStays gt 9 then count90_PriorHospStays_cat = 4;
+
+        if count90_PriorHospStays_cat = 0 then Prior_0_covid = 1;
+        else Prior_0_covid = 0;
+
+        if count90_PriorHospStays_cat = 1 then Prior_1_3_covid = 1;
+        else Prior_1_3_covid = 0;
+
+        if count90_PriorHospStays_cat = 2 then Prior_4_6_covid = 1;
+        else Prior_4_6_covid = 0;
+
+        if count90_PriorHospStays_cat = 3 then Prior_7_9_covid = 1;
+        else Prior_7_9_covid = 0;
+
+        if count90_PriorHospStays_cat = 4 then Prior_GE_10_covid = 1;
+        else Prior_GE_10_covid = 0;
+
+        PROX_ADMSN  = Prox_ADMSNDT;
+        PROX_DSCHRG = Prox_DSCHRGDT;
+
+
+        if MultipleSNFs = 1 or Coinciding_IRF_LTCH_Def2 = 1 then
+            Exclude_DI_DPI_Def2 = 1;
+        else Exclude_DI_DPI_Def2 = 0;
+
+        prox_covid=0;
+        do _I = 1 to dim(PROX_DGNS_CD);
+            if upcase(PROX_DGNS_CD(_I)) = "U071" then prox_covid=1;
+        end;
+        
+        output new_variables2;
+    end;
+
+
+    format PROX_ADMSN PROX_DSCHRG READM_ADMSN READM_DSCHRG mmddyy10.;
+            
+    /**** changing labels for 90 day lookback period and _covid suffix on prior vars ****/        
+
+    label
+        MultipleSNFs                = "SNF stays with another SNF stay with the same HICNO in the same timeframe"
+        Prox_LOS_cat                = "The length of the prior proximal hospital stay by category."
+        los1_3                      = "SNF stays with a prior proximal hospital stay with a length in a given range"
+        los4_7                      = "SNF stays with a prior proximal hospital stay with a length in a given range"
+        los8_14                     = "SNF stays with a prior proximal hospital stay with a length in a given range"
+        los14_GT                    = "SNF stays with a prior proximal hospital stay with a length in a given range"
+        los15_GT                    = "means same as los14_GT and will be phased out"
+        Prox_Intnsv_care            = "Flag for days in an intensive care unit  during the prior proximal stay"
+        Prox_crnry_care             = "Flag for days in a coronary care unit during the prior proximal stay"
+        anyICUdays_rev              = "Flag for days in either an intensive care unit  or a coronary care unit during the prior proximal stay"  
+        count90_PriorHospStays            = "The number of IPPS stays in the 90 days prior to the prior proximal hospital discharge"
+        count90_PriorHospStays_cat        = "Categories for the number of IPPS stays in the 90 days prior to the prior proximal hospital discharge"
+        Prior_0_covid                     = "Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range"
+        Prior_1_3_covid                   = "Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range"
+        Prior_4_6_covid                   = "Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range"
+        Prior_7_9_covid                   = "Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range"
+        Prior_GE_10_covid                 = "Flag for SNF stays with a count of IPPS stays in the last 90 days in a given range"
+        readmission_type            = "The prvdr_numtype of the readmission"
+        daysBtwnPriorProx_Readmit   = "The gap between the prior proximal hospital discharge date and the readmission admission date"
+        readmit_ipps2               = "Flag for IPPS/Psych stay within 30 days of the prior proximal hospital discharge"
+        PROX_ADMSN                  = "Prior prox admission date"
+        PROX_DSCHRG                 = "Prior Prox discharge date"
+        READM_ADMSN                 = "Readmission stay admission date"
+        READM_DSCHRG                = "Readmission stay discharge date"
+        READM_DGNS_CD1              = "Readmission principal diagnosis "
+        READM_PRCDR_CD1       = "Readmission procedure code1-25"
+        READM_prvdr_num             = "Readmission prvdr_numCCN"
+        Coinciding_IRF_LTCH_Def2    = "if there is an IRF or LTCH stay within 30 days after the prior proximal hospital discharge"
+        Exclude_DI_DPI_Def2         = "SNF stays with an intervening IRF or LTCH stay or a POST SNF PAC stay"
+        _IPPS_Psych_FLAG            = "has an IPPS or Psych flag after prior proximal SNF"
+        prox_covid                  = "value of U07.1 in nay field for PROX_DGNS_CD1 through PROX_DGNS_CD25"
+        ;
+run; *23179105 , historical n=12441098  ;
+
+proc sort data=HISTORICAL_d90 out=_d90(keep=INDEX_SNF_ADM_ID hist_covid);
+by INDEX_SNF_ADM_ID descending hist_covid;
+run;
+data _d90;
+    set _d90;
+    by INDEX_SNF_ADM_ID descending hist_covid;
+    if first.INDEX_SNF_ADM_ID;
+run; *8393173  ;
+data index_snf_admission_covid;
+    merge _d90  (in=in1)
+          new_variables2 (in=in2);
+    by INDEX_SNF_ADM_ID;
+    if in2;
+    attrib covid_rf length=3.;
+    
+    /*** covid categorical variable ***/
+    if hist_covid=. then hist_covid=0; 
+    covid_rf=.;
+    if prox_covid=1 then covid_rf=1;
+    else if (prox_covid=0 and hist_covid=1) then covid_rf=2;
+    else if (prox_covid=0 and hist_covid=0) then covid_rf=3;
+    
+    label covid_rf = "1 if prox_covid=1; 2 if prox_covid=0 and hist_covid=1; 3 if prox_covid=0 and hist_covid=0";
+run; *23179105  ;
+
+data index_snf_admission_withnew;
+    merge index_snf_admission (in=in1)
+          index_snf_admission_covid       (in=in2);
+    by INDEX_SNF_ADM_ID;
+    if in1;
+run;*28957484 ;
+
+data FOIADATA.FOIA_03_PROX_11_21; set index_snf_admission_withnew;
+
+    attrib SNF_ADMSN  SNF_DSCHRG length=4.;
+    SNF_ADMSN  = SNF_ADMSNDT;
+    SNF_DSCHRG = DSC_E; 
+
+    if PRIOR_PROXIMAL_STAY      = . then PRIOR_PROXIMAL_STAY = 0;
+    if exclude_NoPriorHosp      = . then exclude_NoPriorHosp = 1;
+    if readmit_ipps2            = . then readmit_ipps2       = 0;
+    if MultipleSNFs             = . then MultipleSNFs        = 0;
+    if Coinciding_IRF_LTCH_Def2 = . then Coinciding_IRF_LTCH_Def2 = 0; 
+    if Exclude_DI_DPI_Def2      = . then Exclude_DI_DPI_Def2 = 0;
+
+    if readmit_ipps2 = . then readmit_ipps2 = 0;
+
+    format SNF_ADMSN SNF_DSCHRG mmddyy10.;
+
+    label
+        SNF_ADMSN  = ""
+        SNF_DSCHRG = "imputed SNF discharge date for reports (template_03)"
+        ;
+run;*28957484  ;
+
+proc contents data=FOIADATA.FOIA_03_PROX_11_21;  run; 
