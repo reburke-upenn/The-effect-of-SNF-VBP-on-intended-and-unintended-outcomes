@@ -1,0 +1,274 @@
+*****************************************************************************************************************************************
+*  Project Name :           SNF DID Analysis				 																			*
+*  Principal Investigator : Burke																										*
+*  Name of Program :        6_FacilityLevel.sas																					*
+*  Programmer :             Jonathan Heintz                                                                								*
+*  Start Date :             April, 2023	 
+*  Proofread :				F Hutchins, June 2025      		                                                        							*
+*  Program Description :	Creating annual analytical dataset for facility level 														*
+*							Creating dataset of unique quartiles per year based on medicare days per snf bed days						*
+*							Creating aggregated quarterly dataset for facility level													*
+*****************************************************************************************************************************************;
+
+*Run library locations;
+%include '[filepath to code writing library locations]';
+
+
+*****************************************************************************************************************************************
+STEP 1: IMPORTING DATA
+*****************************************************************************************************************************************;
+
+DATA PRETIME_SNFS_ANNUAL_FINAL; SET /*HDATA_F.*/PRETIME_SNFS_ANNUAL_FINAL; 
+RUN;
+DATA POSTTIME_SNFS_ANNUAL_FINAL; SET /*HDATA_F.*/POSTTIME_SNFS_ANNUAL_FINAL; 
+RUN;
+PROC SORT DATA=PRETIME_SNFS_ANNUAL_FINAL NODUPKEY; BY SNF_PRVDR_NUM YEAR; RUN;
+PROC SORT DATA=POSTTIME_SNFS_ANNUAL_FINAL NODUPKEY; BY SNF_PRVDR_NUM YEAR; RUN;
+
+DATA ALL_SNFS; SET POSTTIME_SNFS_ANNUAL_FINAL PRETIME_SNFS_ANNUAL_FINAL ; 
+RUN;
+PROC SORT DATA=ALL_SNFS NODUPKEY; BY SNF_PRVDR_NUM YEAR; RUN;
+
+***************************************************************************************
+STEP 2: Calculating number of Medicare bed days per facility bed days and creating exposures
+****************************************************************************************;
+DATA ANNUAL_SNF_MED_BED_DAYS_PER_TOT; SET ALL_SNFS;
+MED_BED_DAYS_PER_TOTBEDS365=ANNUAL_SNF_UTLZTN_DAY_CNT/(TOTBEDS*365);
+RUN;
+
+
+PROC MEANS DATA=ANNUAL_SNF_MED_BED_DAYS_PER_TOT N NMISS MEAN STD MIN Q1 MEDIAN Q3 MAX;
+VAR MED_BED_DAYS_PER_TOTBEDS365; class year;
+OUTPUT OUT=MEDBEDDAYS_P_TOTBEDS365_PYEAR Q1=Q1 MEDIAN=Q2 Q3=Q3;
+RUN;
+PROC SQL;
+	SELECT MAX(CASE WHEN YEAR=2011 THEN Q1 END) AS Q1_2011, 
+		MAX(CASE WHEN YEAR=2012 THEN Q1 END) AS Q1_2012, 
+		MAX(CASE WHEN YEAR=2013 THEN Q1 END) AS Q1_2013, 
+		MAX(CASE WHEN YEAR=2014 THEN Q1 END) AS Q1_2014, 
+		MAX(CASE WHEN YEAR=2015 THEN Q1 END) AS Q1_2015, 
+		MAX(CASE WHEN YEAR=2016 THEN Q1 END) AS Q1_2016, 
+		MAX(CASE WHEN YEAR=2017 THEN Q1 END) AS Q1_2017, 
+		MAX(CASE WHEN YEAR=2018 THEN Q1 END) AS Q1_2018, 
+		MAX(CASE WHEN YEAR=2019 THEN Q1 END) AS Q1_2019, 
+		MAX(CASE WHEN YEAR=2020 THEN Q1 END) AS Q1_2020, 
+		MAX(CASE WHEN YEAR=2021 THEN Q1 END) AS Q1_2021, 
+
+		MAX(CASE WHEN YEAR=2011 THEN Q2 END) AS Q2_2011, 
+		MAX(CASE WHEN YEAR=2012 THEN Q2 END) AS Q2_2012, 
+		MAX(CASE WHEN YEAR=2013 THEN Q2 END) AS Q2_2013, 
+		MAX(CASE WHEN YEAR=2014 THEN Q2 END) AS Q2_2014, 
+		MAX(CASE WHEN YEAR=2015 THEN Q2 END) AS Q2_2015, 
+		MAX(CASE WHEN YEAR=2016 THEN Q2 END) AS Q2_2016, 
+		MAX(CASE WHEN YEAR=2017 THEN Q2 END) AS Q2_2017, 
+		MAX(CASE WHEN YEAR=2018 THEN Q2 END) AS Q2_2018, 
+		MAX(CASE WHEN YEAR=2019 THEN Q2 END) AS Q2_2019, 		
+		MAX(CASE WHEN YEAR=2020 THEN Q2 END) AS Q2_2020, 
+		MAX(CASE WHEN YEAR=2021 THEN Q2 END) AS Q2_2021, 		
+		
+		MAX(CASE WHEN YEAR=2011 THEN Q3 END) AS Q3_2011, 
+		MAX(CASE WHEN YEAR=2012 THEN Q3 END) AS Q3_2012, 
+		MAX(CASE WHEN YEAR=2013 THEN Q3 END) AS Q3_2013, 
+		MAX(CASE WHEN YEAR=2014 THEN Q3 END) AS Q3_2014, 
+		MAX(CASE WHEN YEAR=2015 THEN Q3 END) AS Q3_2015, 
+		MAX(CASE WHEN YEAR=2016 THEN Q3 END) AS Q3_2016, 
+		MAX(CASE WHEN YEAR=2017 THEN Q3 END) AS Q3_2017, 
+		MAX(CASE WHEN YEAR=2018 THEN Q3 END) AS Q3_2018, 
+		MAX(CASE WHEN YEAR=2019 THEN Q3 END) AS Q3_2019,
+		MAX(CASE WHEN YEAR=2020 THEN Q3 END) AS Q3_2020, 
+		MAX(CASE WHEN YEAR=2021 THEN Q3 END) AS Q3_2021
+		
+	INTO :Q1_2011, :Q1_2012, :Q1_2013, :Q1_2014, :Q1_2015, :Q1_2016, :Q1_2017, :Q1_2018, :Q1_2019, :Q1_2020, :Q1_2021, 
+		:Q2_2011, :Q2_2012, :Q2_2013, :Q2_2014, :Q2_2015, :Q2_2016, :Q2_2017, :Q2_2018, :Q2_2019, :Q2_2020, :Q2_2021,
+		:Q3_2011, :Q3_2012, :Q3_2013, :Q3_2014, :Q3_2015, :Q3_2016, :Q3_2017, :Q3_2018, :Q3_2019, :Q3_2020, :Q3_2021
+	FROM MEDBEDDAYS_P_TOTBEDS365_PYEAR;
+QUIT;
+
+
+DATA ANNUAL_SNF_MED_BED_DAYS_PER_TOT2; SET ANNUAL_SNF_MED_BED_DAYS_PER_TOT;
+IF MED_BED_DAYS_PER_TOTBEDS365 NE . THEN DO;
+	if year=2011 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2011. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2011. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2011. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2012 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2012. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2012. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2012. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2013 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2013. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2013. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2013. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2014 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2014. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2014. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2014. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2015 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2015. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2015. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2015. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2016 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2016. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2016. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2016. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2017 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2017. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2017. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2017. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2018 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2018. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2018. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2018. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2019 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2019. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2019. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2019. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2020 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2020. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2020. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2020. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+	if year=2021 THEN DO;
+		IF MED_BED_DAYS_PER_TOTBEDS365<&Q1_2021. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=1;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q2_2021. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=2;
+		ELSE IF MED_BED_DAYS_PER_TOTBEDS365<&Q3_2021. THEN MED_BED_DAYS_PER_TOTBEDS365_Q=3;
+		ELSE MED_BED_DAYS_PER_TOTBEDS365_Q=4;
+	End;
+end;
+RUN;
+
+/* *CREATING EXPOSURE A:  */
+/* 0 = SNF is in the lowest quartile of Medicare bed days/days for >=50% of years observed  */
+/* 1 = SNF is in the highest quartile of Medicare bed days/days for >=50% of years observed */
+/* . = all remaining SNFs */
+/* Step 1: Calculate the number of years each SNF is observed */
+/* PROC CONTENTS DATA=HDATA.ANNUAL_SNF_MED_BED_DAYS_PER_TOT ORDER=VARNUM;RUN; */
+
+/* CREATING EXPOSURE C: */
+/* 0 = SNF is in the lowest quartile of Medicare bed days/days for all years observed */
+/* 1 = SNF is in the highest quartile of Medicare bed days/days for all years observed */
+
+proc sql;
+    create table snf_year_count as
+    select SNF_PRVDR_NUM,
+           count(*) as year_count
+    from ANNUAL_SNF_MED_BED_DAYS_PER_TOT2
+    group by SNF_PRVDR_NUM;
+quit;
+
+proc sql;
+    create table snf_quartile_count as
+    select SNF_PRVDR_NUM,
+           sum(case when MED_BED_DAYS_PER_TOTBEDS365_Q = 1 then 1 else 0 end) as lowest_quartile_count,
+           sum(case when MED_BED_DAYS_PER_TOTBEDS365_Q = 4 then 1 else 0 end) as highest_quartile_count
+    from ANNUAL_SNF_MED_BED_DAYS_PER_TOT2
+    group by SNF_PRVDR_NUM;
+quit;
+
+data EXPOSURE_AC;
+    merge ANNUAL_SNF_MED_BED_DAYS_PER_TOT2 snf_year_count snf_quartile_count;
+    by SNF_PRVDR_NUM;
+    if lowest_quartile_count >= 0.5 * year_count then EXPOSURE_A = 0;
+    	else if highest_quartile_count >= 0.5 * year_count then EXPOSURE_A = 1;
+    	else EXPOSURE_A = .;
+    if lowest_quartile_count = year_count then EXPOSURE_C = 0;
+    	else if highest_quartile_count = year_count then EXPOSURE_C = 1;
+    	else EXPOSURE_C = .;
+run;
+PROC SORT DATA=EXPOSURE_AC; BY YEAR; RUN;
+DATA EXPOSURE_B ; SET ANNUAL_SNF_MED_BED_DAYS_PER_TOT2;
+IF YEAR=2014 & MED_BED_DAYS_PER_TOTBEDS365_Q IN(1,4);
+RUN;
+PROC SQL;
+CREATE TABLE SNF_ANNUAL_FINAL AS
+SELECT A.*, CASE WHEN B.MED_BED_DAYS_PER_TOTBEDS365_Q=1 THEN 0
+	WHEN B.MED_BED_DAYS_PER_TOTBEDS365_Q=4 THEN 1 END AS EXPOSURE_B
+FROM EXPOSURE_AC AS A LEFT JOIN EXPOSURE_B AS B
+ON A.SNF_PRVDR_NUM=B.SNF_PRVDR_NUM
+ORDER BY SNF_PRVDR_NUM, YEAR;
+QUIT;
+
+
+****************************************************************************************
+STEP 3: Creating final facility level dataset
+****************************************************************************************;
+DATA /*FINAL.*/SNF_ANNUAL_11_21; 
+RETAIN SNF_PRVDR_NUM	YEAR	pctNHdaysSNF	SNF_agg_cmi_mds3	SNF_CITY	SNF_COUNTY	SNF_STATE	SNF_ZIP	totbeds	NET_OPERATING_MARGIN	overall_rating	
+	ANNUAL_ALZH_DEM_CCW	ANNUAL_ALZH_DEM_CCW_RATE	ANNUAL_CFI_FRAIL_YN	ANNUAL_CFI_FRAIL_YN_RATE	ANNUAL_DEATHS	ANNUAL_DUAL_BINARY	ANNUAL_DUAL_BINARY_RATE	
+	ANNUAL_ENCOUNTERS	ANNUAL_MORTALITY_RATE	ANNUAL_READ_RATE	ANNUAL_READMINS	ANNUAL_RTI_NONWHITE	ANNUAL_RTI_NONWHITE_RATE	ANNUAL_SNF_UTLZTN_DAY_CNT	
+	FLAG_RURAL	RUCC_2013	MED_BED_DAYS_PER_TOTBEDS365	MED_BED_DAYS_PER_TOTBEDS365_Q;
+SET SNF_ANNUAL_FINAL;
+IF SNF_prvdr_num='' THEN DELETE;
+LABEL flag_rural ="ruralurbancodes2013: 1=Metro 2=Non-Metro";
+LABEL ANNUAL_SNF_UTLZTN_DAY_CNT='Quarterly total number of utilization days';
+LABEL NET_OPERATING_MARGIN='SNF Cost Reports:';
+LABEL SNF_CITY='LTC Focus: City';
+LABEL SNF_COUNTY='LTC Focus: County code';
+LABEL SNF_STATE='LTC Focus: State';
+LABEL SNF_ZIP='LTC Focus: ZIP';
+LABEL overall_rating='From Provider Info dataset';
+LABEL paymcare='LTC Focus: % Medicare';
+LABEL pctNHdaysSNF='LTC Focus: % NH days SNF';
+LABEL totbeds='LTC Focus: # of Beds';
+LABEL SNF_agg_cmi_mds3='LTC Focus: Average Resource Utilization Group Nursing Case Index';
+LABEL MED_BED_DAYS_PER_TOTBEDS365='Annual Number of Medicare bed days per facility bed days';
+LABEL MED_BED_DAYS_PER_TOTBEDS365_Q='Annual Quartile of Annual Number of Medicare bed days per facility bed days';
+LABEL overall_rating='Provider Info';
+LABEL EXPOSURE_A="0 = SNF is in the lowest quartile of Medicare bed days/days for >=50% of years observed 
+1 = SNF is in the highest quartile of Medicare bed days/days for >=50% of years observed";
+LABEL EXPOSURE_B="0 = SNF is in the lowest quartile of Medicare bed days/days in 2014
+1 = SNF is in the highest quartile of Medicare bed days/days in 2014";
+LABEL EXPOSURE_C="0 = SNF is in the lowest quartile of Medicare bed days/days for all years observed 
+1 = SNF is in the highest quartile of Medicare bed days/days for all years observed";
+LABEL year_count='Number of years SNF is in the study';
+LABEL lowest_quartile_count='Number of years SNF is in the lowest quartile (Medicare bed days per facility bed days)';
+label highest_quartile_count ='Number of years SNF is in the lowest quartile (Medicare bed days per facility bed days)';
+RUN;
+
+*****************************************************************************************************************************************
+STEP 4: CONCATENATING PRETIME AND POSTTIME QUARTERLY FACILITY LEVEL DATA
+*****************************************************************************************************************************************;
+DATA POSTTIME_SNFS_QUARTERLY_FINAL; SET /*HDATA_F.*/POSTTIME_SNFS_QUARTERLY_FINAL;
+RUN;
+DATA PRETIME_SNFS_QUARTERLY_FINAL; SET /*HDATA_F.*/PRETIME_SNFS_QUARTERLY_FINAL;
+RUN;
+
+DATA /*FINAL.*/SNF_QUARTERLY_11_21; SET PRETIME_SNFS_QUARTERLY_FINAL POSTTIME_SNFS_QUARTERLY_FINAL;
+LABEL QUARTER='Sequential order of 3-month time periods starting 01/01/2011 to 12/31/2019.';
+LABEL QUARTER_ALZH_DEM_CCW="Quarterly total number of patients with Alzheimer's/Dementia defined by CCW";
+LABEL QUARTER_ALZH_DEM_CCW_RATE="Quarterly Alzheimer's/Dementia rate identified by CCW";
+LABEL QUARTER_CFI_FRAIL_YN='Quarterly total number of patients considered frail by Kim index';
+LABEL QUARTER_CFI_FRAIL_YN_RATE='Quarterly Frailty Rate identified by Kim Index';
+LABEL QUARTER_DEATHS='Quarterly total number of patient deaths';
+LABEL QUARTER_DUAL_BINARY='Quarterly total number of dual eligible patiens';
+LABEL QUARTER_DUAL_BINARY_RATE='Quarterly dual eligiblitity rate';
+LABEL QUARTER_ENCOUNTERS='Quarterly total number of patient encounters';
+LABEL QUARTER_MORTALITY_RATE='Quarterly Mortality Rate';
+LABEL QUARTER_MORTALITY_RATE_NOREADMIN='Quarterly Mortality Rate without patient readmission';
+LABEL QUARTER_READMIN_RATE='Quarterly Readmission Rate';
+LABEL QUARTER_READMINS='Quarterly total number of patient readmissions within 30 days of discharge';
+LABEL QUARTER_RTI_NONWHITE='Quarterly total number of nonwhite patients';
+LABEL QUARTER_RTI_NONWHITE_RATE='Quarterly rate of nonwhite patients';
+LABEL SNF_prvdr_num='MedPar: SNF CCN';
+LABEL YEAR='Year of quarter';
+RUN;
+ 
