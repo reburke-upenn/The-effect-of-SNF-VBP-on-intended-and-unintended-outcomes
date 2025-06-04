@@ -35,3 +35,6 @@ The following files are the analytic code for the difference in differences mode
 
 DID_MACRO_WRITE.R
 DID_MACRO_CALL.R
+
+For any questions, contact Dr. Robert Burke at the University of Pennsylvania.
+Email Address: Robert.Burke2@pennmedicine.upenn.edu
