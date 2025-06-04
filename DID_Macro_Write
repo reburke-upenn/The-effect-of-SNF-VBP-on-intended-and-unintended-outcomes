@@ -1,0 +1,437 @@
+#########################################################################################################################################
+#  Project Name :           SNF DID Analysis				 																		                                              	#
+#  Principal Investigator : Burke																										                                                    #
+#  Name of Program :        DID_MACRO_WRITE.R									      												                                                  #
+#  Programmer :             Jonathan Heintz                                                                 							              #
+#  Start Date :             August 1st, 2024	         
+#  Proofread :              F Hutchins, June 2025
+#  Program Description :	  Macro to run all Difference and Difference models						                                                  #
+#########################################################################################################################################
+
+library(fixest)    #fixed effects package with did function
+library(tidyverse) #data management
+library(haven)     #contains readsas
+library(broom)     #for tidy model result summaries
+library(dplyr)     #data manipulation
+library(sqldf)     #for manipulating data frames
+library(openxlsx)  #for opening and exporting excel files
+
+
+#########################################################################################################################################
+#function did_function: runs difference in difference and outputs/saves useful output                                                   #
+#   NOTE: in addition to function inputs, the following variables must already be in dataset                                            #
+#     snf_prvdr_num, year, aco, acute_cnt_365, agesex_cat, bpci, cc_updated_weight_nolb, ccs_primarydgns, ct_ind, dis_ind, ent_ind,     # 
+#     esrd, gen_ind, hrrp_penalty, neuro_ind, obgyn_ind, ophtha_ind, ortho_ind, prox_icarecnt, prox_los_cat, uro_ind                    #
+#did_function <- function(dataset, outcome, baselineYear = 2015, exposureVar, suffix, family = 1                                        #
+#                         includeCovid = TRUE, includeCovars = FALSE, outputFilename = output)                                          #
+#                                                                                                                                       #
+#                                                                                                                                       #
+#function inputs:                                                                                                                       #
+#   dataset = dataset containing visit level data with year, snf_prvdr_num, and the exposure variable                                   #
+#   outcome = outcome variable for the model | NOTE must already be present in dataset                                                  #
+#   baselineYear = first year of the post period                                                                                        #
+#                  DEFAULT 2015                                                                                                         #
+#   exposureVar = binary (1/0) of exposure variable | NOTE must already be present in dataset                                   #
+#   suffix = text string unique identifier for output variables                                                                         #
+#   family = 0 = linear reg | 1 = binomial | 2 = Gamma (log='link') 
+#   includeCovid = when set to TRUE, years 2020-2021 are included | when set to FALSE, years 2020-2021 are excluded                     #
+#                  DEFAULT TRUE                                                                                                         #
+#   includeCovars = when set to TRUE, model uses fixed effects and covariates | when set to FALSE, model only uses fixed effects        #
+#                  DEFAULT FALSE                                                                                                        #
+#   outputFilename = filename for .xlsx output (NOTE if outputFilename = "", no .xlsx file is created)                                  #
+#                  DEFAULT "" | I.E. no file is created                                                                                 #
+#                                                                                                                                       #
+#function outputs:  this function prints all of the following in console AND saves them to memory                                       #
+#                   *outputFilename*.xlsx is saved to working directory and contains all of the following tables (no graphics)          #
+#   did_model_*suffix* = default model summary for annual estimates                                                                     #
+#   aic_*suffix* = AIC of model                                                                                                         #
+#   bic_*suffix* = BIC of model                                                                                                         #
+#   neg2logLik_*suffix* = -2loglikelihood of model                                                                                      #
+#   coeftable_*suffix* = per year estimates, OR, CI, and p-value compared to baselineYear                                               #
+#   forest_plot_*suffix* = default plot of per year estimates (not ORs)                                                                 #
+#   did_model_prepost_*suffix* = default model summary for aggregate estimates                                                          #
+#   coeftable_prepost_*suffix* = aggregate estimates, OR, CI, and p-value                                                               #
+#########################################################################################################################################
+
+did_function <- function(dataset, outcome, baselineYear = 2015, exposureVar, suffix, family=1,
+                            includeCovid = TRUE, includeCovars = FALSE, outputFilename = "") {
+  suffix <- deparse(substitute(suffix))
+  
+  #Filter data if includeCovid = FALSE
+  temp_data <- dataset
+  if (!includeCovid) {
+    temp_data <- temp_data %>% filter(year < 2020)
+  }
+  
+  
+  #Create sunab exposure variable 1 year after baseline
+  #Remove visits with missing exposure variable
+  temp_data <- temp_data%>%  
+    mutate(covid = ifelse(year < 2020, "Pre-COVID", "COVID"),
+           post  = ifelse(year > baselineYear, 1, 0),
+           year_char  = factor(year)) %>%
+    filter(!is.na({{exposureVar}}))
+  
+  
+  #Run the model per year
+  outcome <- deparse(substitute(outcome))
+  exposureVar <- deparse(substitute(exposureVar))
+  if (includeCovars == FALSE) {
+    model_formula <- as.formula(paste0(outcome, " ~ i(year,", exposureVar, ", ", baselineYear," ) | snf_prvdr_num + year"))
+  } else if (includeCovars == TRUE) {
+    model_formula <- as.formula(paste0(outcome, " ~ i(year,", exposureVar, ", ", baselineYear," ) + aco + acute_cnt_365 + agesex_cat + bpci + cc_updated_weight_nolb + ccs_primarydgns + ct_ind + dis_ind + ent_ind + esrd + gen_ind + hrrp_penalty + neuro_ind + obgyn_ind + ophtha_ind + ortho_ind + prox_icarecnt + prox_los_cat + uro_ind | snf_prvdr_num + year"))
+  } 
+  
+  if(family==0) {
+    did_model_ <- feglm(model_formula, 
+                        data = temp_data, 
+                        vcov = ~ fips_cd)
+  } else if(family==1) {
+    did_model_ <- feglm(model_formula, 
+                        data = temp_data, 
+                        family = binomial, 
+                        vcov = ~ fips_cd)
+  } else if (family==2) {
+    did_model_ <- feglm(model_formula, 
+                        data = temp_data, 
+                        family = Gamma(link = 'log'), 
+                        vcov = ~ fips_cd)
+  }
+  assign(paste0("did_model_", suffix), did_model_, envir = .GlobalEnv)
+  
+  
+  #Model fit parameters
+  aic_ <- AIC(did_model_)
+  assign(paste0("aic_", suffix), aic_, envir = .GlobalEnv)
+  bic_ <- BIC(did_model_)
+  assign(paste0("bic_", suffix), bic_, envir = .GlobalEnv)
+  neg2logLik_ <- -2 * logLik(did_model_)
+  assign(paste0("neg2logLik_", suffix), neg2logLik_, envir = .GlobalEnv)
+  
+  
+  #Per year table of ORs
+  if (includeCovars == FALSE) {
+    forest_plot_ <- capture.output(suppressMessages(suppressWarnings(iplot(did_model_, main = paste0(exposureVar, " (Fixed Effects Only)")))))
+  } else if (includeCovars == TRUE) {
+    forest_plot_ <- capture.output(suppressMessages(suppressWarnings(iplot(did_model_, main = paste0(exposureVar, " (Fixed Effects & Covariates)")))))
+  }
+  assign(paste0("forest_plot_", suffix), forest_plot_, envir = .GlobalEnv)
+
+  
+  if (family == 1) {
+    confint_val_ <- confint(did_model_)
+    assign(paste0("confint_val_", suffix), confint_val_, envir = .GlobalEnv)
+    
+    coeftable_ <- data.frame(summary(did_model_)$coeftable)
+    coeftable_$OR <- exp(coeftable_$Estimate)
+    coeftable_$lower <- confint_val_$`2.5 %`
+    coeftable_$OR_lower <- exp(coeftable_$lower)
+    coeftable_$upper <- confint_val_$`97.5 %`
+    coeftable_$OR_upper <- exp(coeftable_$upper)
+    coeftable_$year <- factor(rownames(coeftable_), levels = rownames(coeftable_))
+    coeftable_$year <- as.character(coeftable_$year)
+    coeftable_ <- coeftable_ %>%
+      mutate(year = substr(year, 7, 10)) %>%
+      arrange(year)
+    names(coeftable_)[names(coeftable_) == "Pr...z.."] <- "pval"
+    new_row <- data.frame(Estimate = 0, Std..Error = NA, z.value = NA, pval = NA, OR = 1, lower = NA, OR_lower = NA, upper = NA, OR_upper = NA, year = as.factor(baselineYear))
+    coeftable_ <- bind_rows(coeftable_, new_row)
+    coeftable_ <- coeftable_ %>%
+      mutate(year_num = as.numeric(year)) %>%
+      arrange(year_num)
+    rownames(coeftable_) <- NULL
+    coeftable_ <- coeftable_ %>% filter(!is.na(year_num))
+    assign(paste0("coeftable_", suffix), coeftable_, envir = .GlobalEnv)
+  } else {
+    confint_val_ <- confint(did_model_)
+    assign(paste0("confint_val_", suffix), confint_val_, envir = .GlobalEnv)
+    coeftable_ <- data.frame(summary(did_model_)$coeftable)
+    coeftable_$lower <- confint_val_$`2.5 %`
+    coeftable_$upper <- confint_val_$`97.5 %`
+    coeftable_$year <- factor(rownames(coeftable_), levels = rownames(coeftable_))
+    coeftable_$year <- as.character(coeftable_$year)
+    coeftable_ <- coeftable_ %>%
+      mutate(year = substr(year, 7, 10)) %>%
+      arrange(year)
+    names(coeftable_)[names(coeftable_) == "Pr...t.."] <- "pval"
+    new_row <- data.frame(Estimate = 0, Std..Error = NA, t.value = NA, pval = NA, lower = NA, upper = NA, year = as.factor(baselineYear))
+    coeftable_ <- bind_rows(coeftable_, new_row)
+    coeftable_ <- coeftable_ %>%
+      mutate(year_num = as.numeric(year)) %>%
+      arrange(year_num)
+    rownames(coeftable_) <- NULL
+    coeftable_ <- coeftable_ %>% filter(!is.na(year_num))
+    assign(paste0("coeftable_", suffix), coeftable_, envir = .GlobalEnv)
+  }
+  
+  
+  #Run the model pre/post for aggregate estimate
+  if (includeCovars == FALSE) {
+    model_formula_prepost <- as.formula(paste0(outcome, " ~ i(", exposureVar, "*post) | snf_prvdr_num + year"))
+  } else if (includeCovars == TRUE) {
+    model_formula_prepost <- as.formula(paste0(outcome, " ~ i(", exposureVar, "*post) + aco + acute_cnt_365 + agesex_cat + bpci + cc_updated_weight_nolb + ccs_primarydgns + ct_ind + dis_ind + ent_ind + esrd + gen_ind + hrrp_penalty + neuro_ind + obgyn_ind + ophtha_ind + ortho_ind + prox_icarecnt + prox_los_cat + uro_ind | snf_prvdr_num + year"))
+  } 
+  
+
+  if(family==0) {
+    did_model_prepost_ <- feglm(model_formula_prepost, 
+                          data = temp_data, 
+                          vcov = ~ fips_cd)
+  } else if(family==1) {
+    did_model_prepost_ <- feglm(model_formula_prepost, 
+                        data = temp_data, 
+                        family = binomial, 
+                        vcov = ~ fips_cd)
+  } else if (family==2) {
+    did_model_prepost_ <- feglm(model_formula_prepost, 
+                        data = temp_data, 
+                        family = Gamma(link = 'log'), 
+                        vcov = ~ fips_cd)
+  }
+  
+  assign(paste0("did_model_prepost_", suffix), did_model_prepost_, envir = .GlobalEnv)
+
+  if (family == 1) {
+    confint_prepost_ <- confint(did_model_prepost_)
+    assign(paste0("confint_prepost_", suffix), confint_prepost_, envir = .GlobalEnv)
+    
+    coeftable_prepost_ <- data.frame(summary(did_model_prepost_)$coeftable)
+    coeftable_prepost_$OR <- exp(coeftable_prepost_$"Estimate")
+    coeftable_prepost_$lower <- confint_prepost_$"2.5 %"
+    coeftable_prepost_$OR_lower <- exp(coeftable_prepost_$"lower")
+    coeftable_prepost_$upper <- confint_prepost_$"97.5 %"
+    coeftable_prepost_$OR_upper <- exp(coeftable_prepost_$"upper")
+    coeftable_prepost_$factor =factor(rownames(coeftable_prepost_), levels = rownames(coeftable_prepost_))
+    coeftable_prepost_ <- coeftable_prepost_[1,]
+    names(coeftable_prepost_)[names(coeftable_prepost_) == "Pr...z.."] <- "pval"
+    rownames(coeftable_prepost_) <- NULL
+    assign(paste0("coeftable_prepost_", suffix), coeftable_prepost_, envir = .GlobalEnv)  
+  } else {
+    confint_prepost_ <- confint(did_model_prepost_)
+    assign(paste0("confint_prepost_", suffix), confint_prepost_, envir = .GlobalEnv)
+    
+    coeftable_prepost_ <- data.frame(summary(did_model_prepost_)$coeftable)
+    coeftable_prepost_$lower <- confint_prepost_$"2.5 %"
+    coeftable_prepost_$upper <- confint_prepost_$"97.5 %"
+    coeftable_prepost_$factor =factor(rownames(coeftable_prepost_), levels = rownames(coeftable_prepost_))
+    coeftable_prepost_ <- coeftable_prepost_[1,]
+    names(coeftable_prepost_)[names(coeftable_prepost_) == "Pr...t.."] <- "pval"
+    rownames(coeftable_prepost_) <- NULL
+    assign(paste0("coeftable_prepost_", suffix), coeftable_prepost_, envir = .GlobalEnv)  
+  }
+  
+  #print saved information 
+  print('model information')
+  print(did_model_)
+  print('')
+  print(paste('AIC =',aic_))
+  print(paste('BIC =',bic_))
+  print(paste('-2loglikelihood =',neg2logLik_))
+  if (family == 1) {
+    print('aggregate OR table')
+    print(coeftable_prepost_[, c('Estimate', 'lower', 'upper', 'OR', 'OR_lower', 'OR_upper', 'pval')])
+    print('')
+    print('per year OR table')
+    print(coeftable_[, c('year', 'Estimate', 'lower', 'upper', 'OR', 'OR_lower', 'OR_upper', 'pval')])
+  } else {
+    print('aggregate table')
+    print(coeftable_prepost_[, c('Estimate', 'lower', 'upper', 'pval')])
+    print('')
+    print('per year table')
+    print(coeftable_[, c('year', 'Estimate', 'lower', 'upper', 'pval')])
+  }
+
+  forest_plot_
+  
+  
+  #creating excel workbook with saved information if outputFilename is not ""
+  if (outputFilename != "") {
+    if (family == 1) {
+      wb <- createWorkbook()
+      addWorksheet(wb, "Sheet1")
+      start_row <- 1
+      write_data_with_blank_row <- function(wb, sheet, data, start_row, title) {
+        writeData(wb, sheet, title, startRow = start_row, startCol = 1)
+        start_row <- start_row + 1
+        writeData(wb, sheet, data, startRow = start_row, startCol = 1, rowNames = FALSE)
+        start_row <- start_row + nrow(data) + 2 # 2 blank rows
+        return(start_row)
+      }
+      summary_info <- capture.output(summary(did_model_))
+      summary_info_df <- data.frame(Summary = summary_info)
+      
+      fit_df <- data.frame(Metric = c("AIC", "BIC", "-2loglikelihood"), Value = c(aic_, bic_, neg2logLik_))
+      
+      start_row <- write_data_with_blank_row(wb, "Sheet1", summary_info_df, start_row, "did_model_Summary")
+      start_row <- write_data_with_blank_row(wb, "Sheet1", fit_df, start_row, "model_fit")
+      start_row <- write_data_with_blank_row(wb, "Sheet1", coeftable_prepost_[, c('Estimate', 'lower', 'upper', 'OR', 'OR_lower', 'OR_upper', 'pval')], start_row, "coeftable_prepost_")
+      start_row <- write_data_with_blank_row(wb, "Sheet1", coeftable_[, c('year', 'Estimate', 'lower', 'upper', 'OR', 'OR_lower', 'OR_upper', 'pval')], start_row, "coeftable_")
+      saveWorkbook(wb, paste0(outputFilename,".xlsx"), overwrite = TRUE)
+    } else {
+      wb <- createWorkbook()
+      addWorksheet(wb, "Sheet1")
+      start_row <- 1
+      write_data_with_blank_row <- function(wb, sheet, data, start_row, title) {
+        writeData(wb, sheet, title, startRow = start_row, startCol = 1)
+        start_row <- start_row + 1
+        writeData(wb, sheet, data, startRow = start_row, startCol = 1, rowNames = FALSE)
+        start_row <- start_row + nrow(data) + 2 # 2 blank rows
+        return(start_row)
+      }
+      summary_info <- capture.output(summary(did_model_))
+      summary_info_df <- data.frame(Summary = summary_info)
+      
+      fit_df <- data.frame(Metric = c("AIC", "BIC", "-2loglikelihood"), Value = c(aic_, bic_, neg2logLik_))
+      
+      start_row <- write_data_with_blank_row(wb, "Sheet1", summary_info_df, start_row, "did_model_Summary")
+      start_row <- write_data_with_blank_row(wb, "Sheet1", fit_df, start_row, "model_fit")
+      start_row <- write_data_with_blank_row(wb, "Sheet1", coeftable_prepost_[, c('Estimate', 'lower', 'upper', 'pval')], start_row, "coeftable_prepost_")
+      start_row <- write_data_with_blank_row(wb, "Sheet1", coeftable_[, c('year', 'Estimate', 'lower', 'upper', 'pval')], start_row, "coeftable_")
+      saveWorkbook(wb, paste0(outputFilename,".xlsx"), overwrite = TRUE)
+      
+    }
+  }
+  
+  
+  #saving inputs for custom forest plot
+  outcome_plot <<- outcome
+  baselineYear_plot <<- deparse(substitute(baselineYear))
+  exposureVar_plot <<- exposureVar
+  suffix_plot <<- suffix
+  includeCovid_plot <<- deparse(substitute(includeCovid))
+  includeCovars_plot <<- deparse(substitute(includeCovars))
+}
+#Examples
+#did_function(dataset = benesamp, outcome = readmit, baselineYear = 2014, exposureVar = exposure_a, 
+#                suffix = a, family = 1, includeCovid = TRUE, includeCovars = FALSE, outputFilename = "")
+#did_function(dataset = benesamp, outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+#                 suffix = a, family = 1,includeCovid = TRUE, includeCovars = TRUE, outputFilename = "")
+#did_function(dataset = benesamp, outcome = readmit,  baselineYear = 2015, exposureVar = exposure_a, 
+#                 suffix = a, family = 1,includeCovid = FALSE, includeCovars = FALSE, outputFilename = output)
+#did_function(dataset = benesamp, outcome = readmit,  baselineYear = 2015, exposureVar = exposure_b, 
+#                 suffix = b, family = 1,includeCovid = FALSE, includeCovars = TRUE, outputFilename = output)
+
+
+########################################################################################################################################
+#function did_forest_plot: Creates forest plot of per year odds ratios or coefficient estimates                                         #
+#   NOTE must first run did_function                                                                                                    #
+#did_forest_plot <- function(outcomeText = OUTCOME, saveTo = "", width = 1024, height = 480)                                            #
+#                                                                                                                                       #
+#                                                                                                                                       #
+#function inputs:                                                                                                                       #
+#   outcomeText = outcome string to appear in plot title                                                                                #
+#               DEFAULT "OUTCOME"                                                                                                       #
+#   OR = y-axis variable | 1 = OR, 0 = Coefficients                                                                                     #
+#       DEFAULT 1                                                                                                                       #
+#   y_lower = lower limit of the y-axis                                                                                                 #
+#            DEFAULT 0.8 when OR=1, -0.2 when OR=0                                                                                      #
+#   y_upper = upper limit of the y-axis                                                                                                 #
+#            DEFAULT 1.2 when OR=1, 0.2 when OR=0                                                                                       #
+#   title = Title of the plot                                                                                                           #
+#           DEFAULT if fixed effects only: Exposure *suffix* (Fixed Effects Only): Effect of *outcomeText*                              #
+#           DEFAULT if fixed effects and covariates: Exposure *suffix* (Fixed Effects & Covariates): Effect of *outcomeText*            #
+#   saveTo = file location to set as working directory for which the plot will be save                                                  #
+#           DEFAULT ""                                                                                                                  #          
+#   width = width in number of pixels (NOTE only necessary is saveTo is not blank)                                                      #
+#           DEFAULT 1024                                                                                                                #          
+#   height = height in number of pixels (NOTE only necessary is saveTo is not blank)                                                    #
+#            DEFAULT 480                                                                                                                #
+#                                                                                                                                       #
+#function outputs:                                                                                                                      #
+#   if saveTo = "", then the plot will appear in the plots pane                                                                         #
+#   if saveTo is a directory, then the plot will be saved to the folder with a file name of the structure                               #
+#     did_*exposureVar*_*fixed/fixed_covariates*_*wCovid/noCovid*.jpg                                                                   #
+#########################################################################################################################################
+
+did_forest_plot <- function(outcomeText = OUTCOME, OR = 1, y_lower = 0.8, y_upper = 1.2, title="", saveTo = "", width = 1024, height = 480) {
+  outcomeText <- deparse(substitute(outcomeText))
+  
+  if (includeCovars_plot == FALSE) {
+    includeCovarsText <- "fixed"
+  } else if (includeCovars_plot == TRUE) {
+    includeCovarsText <- "fixed_covariates"
+  } else {
+    stop("No valid covariate selection (TRUE/FALSE)")
+  }
+  
+  if (includeCovid_plot == FALSE) {
+    includeCovidText <- "noCovid"
+  } else if (includeCovid_plot == TRUE) {
+    includeCovidText <- "wCovid"
+  } else {
+    stop("No valid covid selection (TRUE/FALSE)")
+  }  
+  coeftable_name <- paste0("coeftable_", suffix_plot)
+  temp_data <- get(coeftable_name, envir = .GlobalEnv)
+  
+  
+  default_title <- paste0("Exposure ", toupper(suffix_plot), 
+                          if (includeCovars_plot) {" (Fixed Effects & Covariates): Effect of "} 
+                          else {" (Fixed Effects Only): Effect of "}, 
+                          outcomeText)
+  plot_title <- ifelse(title != "", title, default_title)
+  
+  if(OR == 1) {
+    y_lower <- ifelse(y_lower != 0.8, y_lower, 0.8)
+    y_upper <- ifelse(y_upper != 1.2, y_upper, 1.2)
+  } else if (OR == 0){
+    y_lower <- ifelse(y_lower != 0.8, y_lower, -0.2)
+    y_upper <- ifelse(y_upper != 1.2, y_upper, 0.2)
+  }
+  
+  if (OR == 1){
+    plot <- ggplot(temp_data %>% arrange(year_num), aes(x = as.factor(year_num), y = OR)) +
+      geom_point() +
+      geom_errorbar(aes(ymin = OR_lower, ymax = OR_upper), width = 0.2) +
+      geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+      scale_y_continuous(limits = c(y_lower, y_upper), breaks = seq(y_lower, y_upper, by = 0.05)) +
+      labs(title = plot_title,
+           x = "Years",
+           y = "Risk Ratio") +
+      theme_minimal() +
+      theme(panel.border = element_rect(color = "black", fill = NA, size = 1),
+            panel.grid.major = element_line(size = 0.75), 
+            panel.grid.minor = element_line(size = 0.5),
+            axis.title = element_text(size = 14), 
+            plot.title = element_text(size = 16, hjust = 0.5),
+            axis.text = element_text(size = 12, color = "black"))
+  } else if (OR == 0){
+    plot <- ggplot(temp_data %>% arrange(year_num), aes(x = as.factor(year_num), y = Estimate)) +
+      geom_point() +
+      geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+      scale_y_continuous(limits = c(y_lower, y_upper), breaks = seq(y_lower, y_upper, by = 0.05)) +
+      labs(title = plot_title,
+           x = "Year",
+           y = "Coefficient Estimate") +
+      theme_minimal() +
+      theme(panel.border = element_rect(color = "black", fill = NA, size = 1),
+            panel.grid.major = element_line(size = 0.75), 
+            panel.grid.minor = element_line(size = 0.5),
+            axis.title = element_text(size = 14), 
+            plot.title = element_text(size = 16, hjust = 0.5),
+            axis.text = element_text(size = 12, color = "black"))
+  }
+  
+  
+  if (saveTo != "") {
+    setwd(saveTo)
+    jpeg(paste0("did_", suffix_plot, "_", exposureVar_plot, "_", includeCovarsText, "_", includeCovidText, ".jpg"), width = width, height = height, res = 72)
+    print(plot)
+    dev.off()
+  } else {
+    print(plot)
+  }
+}
+
+
+#Examples
+#did_forest_plot(outcomeText = UnadjReadmission, OR=1, y_lower=0.75, y_upper=1.25,
+#                title="Unadjusted Readmission Rates by Low vs High Quartile Medicare Bed Days",
+#                #saveTo = "[filepath]/temp", width = 1024, height = 480
+#)
+#did_forest_plot(outcomeText = UnadjReadmission, OR=0, 
+#                #                y_lower=0.75, y_upper=1.25,
+#                title="Unadjusted Readmission Rates by Low vs High Quartile Medicare Bed Days",
+#                #saveTo = "[filepath]/temp", width = 1024, height = 480
+#)
