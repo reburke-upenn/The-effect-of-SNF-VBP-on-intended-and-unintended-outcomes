@@ -1,0 +1,347 @@
+#########################################################################################################################################
+#  Project Name :           SNF DID Analysis				 																		                                              	#
+#  Principal Investigator : Burke																										                                                    #
+#  Name of Program :        DID_MACRO_CALL.R																							                                              #
+#  Programmer :             Jonathan Heintz                                                                 							              #
+#  Start Date :             September 9th, 2024	        
+#  Proofread :              F Hutchins, June 2025     
+#  Purpose :                Call macro (DID_MACRO_WRITE.R) for difference in differences analysis
+#                           File also contains code for describing observed outcome rates
+#########################################################################################################################################
+
+library(sqldf) #For manipulating data frames
+
+###############################################################################
+#STEP 1. Bring in Data and Macro
+###############################################################################
+object_to_keep <- c("abbrev_foia_11_21_12062024","snf_annual_11_21_28082024")
+all_objects <- ls()
+objects_to_remove <- setdiff(all_objects, object_to_keep)
+rm(list = objects_to_remove)
+gc()
+ 
+setwd ("[filepath]")
+source("[filepath]/DID_MACRO_WRITE.R")
+
+selected_col <- c('BENE_ID', 'MedPARRecordNumber', 'SNF_PRVDR_NUM', 'DEATH', 'DUAL_BINARY', 'ESRD', 'fips_cd', 'OREC', 'RTI_NONWHITE', 'RTI_RACE_CD', 'sex', 'ACUTE_CNT_365', 'BIPOL_SCHIZ_1YRLB', 'PROX_ADM_YEAR', 'Prox_admsndt', 'Prox_DSC_YEAR', 'Prox_DSCHRG', 'Prox_ICARECNT', 'Prox_LOSCNT', 'SNF_ADM_YEAR', 'SNF_ADMSNDT', 'snf_age_cnt', 'SNF_ICARECNT', 'SNF_LOSCNT', 'anyICUdays_rev', 'Prox_Intnsv_care', 'Prox_LOS_cat', 'readmit_ipps_up', 'SNF_DSC', 'ALZH_DEM_CCW', 'successful_discharge', 'CC_UPDATED_WEIGHT_NOLB', 'CC_WEIGHT_NOLB', 'CFI_FRAIL_YN', 'CFI_SCORE', 'TOT_GRP_NOLB', 'ACO', 'ANNUAL_ENCOUNTERS', 'ANNUAL_READ_RATE', 'ANNUAL_MORTALITY_RATE', 'bpci', 'EXPOSURE_A', 'EXPOSURE_B', 'EXPOSURE_C', 'EXPOSURE_A_25', 'EXPOSURE_B_25', 'EXPOSURE_C_25', 'HRRP_Penalty', 'MED_BED_DAYS_PER_TOTBEDS365', 'MED_BED_DAYS_PER_TOTBEDS365_Q', 'multifac', 'PROFIT', 'RSRR', 'SNF_agg_cmi_mds3', 'totbeds', 'agesex_cat', 'CCS_primaryDGNS', 'ct_ind', 'Dis_Ind', 'ent_ind', 'gen_ind', 'neuro_ind', 'obgyn_ind', 'ophtha_ind', 'ortho_ind', 'uro_ind', 'NET_OPERATING_MARGIN','totbeds', 'ANNUAL_unsuccessful_discharge', 'ANNUAL_UD_RATE', 'ANNUAL_successful_discharge', 'ANNUAL_SD_RATE')
+abbrev_foia_11_21_12062024 <- read_sas("[filepath]/foia_11_21_12062024.sas7bdat", col_select = selected_col)
+names(abbrev_foia_11_21_12062024) <-tolower(names(abbrev_foia_11_21_12062024))
+gc() 
+
+names(abbrev_foia_11_21_12062024)[names(abbrev_foia_11_21_12062024) == "prox_dsc_year"] <- "year"
+names(abbrev_foia_11_21_12062024)[names(abbrev_foia_11_21_12062024) == "readmit_ipps_up"] <- "readmit"
+abbrev_foia_11_21_12062024 <- abbrev_foia_11_21_12062024%>%  
+  mutate(covid = ifelse(year <2020, "Pre-COVID", "COVID"),
+         post  = ifelse(year >=2015, 1, 0),
+         year_char  = factor(year))
+
+selected_col2 <- c('SNF_PRVDR_NUM', 'YEAR', 'NET_OPERATING_MARGIN', 'MED_BED_DAYS_PER_TOTBEDS365', 'MED_BED_DAYS_PER_TOTBEDS365_Q', 'totbeds', 'multifac','profit')
+snf_annual_11_21_28082024 <- read_sas("[filepath]/snf_annual_11_21_28082024.sas7bdat", col_select = selected_col2)
+names(snf_annual_11_21_28082024) <-tolower(names(snf_annual_11_21_28082024))
+gc() 
+snf_annual_11_21_28082024$profit_num <- ifelse(snf_annual_11_21_28082024$profit == "Yes", 1,
+                                                ifelse(snf_annual_11_21_28082024$profit == "No", 0, NA))
+snf_annual_11_21_28082024$multifac_num <- ifelse(snf_annual_11_21_28082024$multifac == "Yes", 1,
+                                                  ifelse(snf_annual_11_21_28082024$multifac == "No", 0, NA))
+
+#creating 2015 SNF dataset
+snf_15 <- snf_annual_11_21_28082024 %>%
+  filter(year==2015) %>%
+  select(snf_prvdr_num, totbeds, profit_num, multifac_num, net_operating_margin)
+
+#quartiles for SNF size
+totbeds_quartiles <- quantile(snf_15$totbeds, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+snf_15$totbeds_q <- cut(snf_15$totbeds, 
+                        breaks = c(-Inf, totbeds_quartiles[1], totbeds_quartiles[2], totbeds_quartiles[3], Inf), 
+                        labels = c(1, 2, 3, 4), 
+                        right = FALSE)
+snf_15$totbeds_q <- as.numeric(as.character(snf_15$totbeds_q))
+
+#binary indicator for above/below net_operating_margin(nom)
+avgnom15 <- snf_15 %>%
+  summarise(avgnom15 = mean(net_operating_margin, na.rm = TRUE)) %>%
+  pull(avgnom15)
+snf_15$nom15_binary <- ifelse(is.na(snf_15$net_operating_margin), NA, 
+                              ifelse(snf_15$net_operating_margin < avgnom15, 0, 1))
+
+abbrev_foia_11_21_12062024 <-  sqldf("
+  SELECT a.*, b.profit_num as profit_15, b.multifac_num as multifac_15, b.nom15_binary, b.totbeds_q as totbeds_q_15
+  FROM abbrev_foia_11_21_12062024 a LEFT JOIN snf_15 b
+  ON A.snf_prvdr_num=B.snf_prvdr_num
+")
+
+
+#########################################################################################
+#STEP 2. Run Adjusted difference in differences models, Exposure=A
+#########################################################################################
+
+#########################################################################################
+#STEP 2a. Basic macro call for primary outcome (readmission)
+#########################################################################################
+did_function(dataset = abbrev_foia_11_21_12062024, 
+             outcome = readmit,         #outcome (any readmission)
+             baselineYear = 2015,       #baseline year for difference in differences
+             exposureVar = exposure_a,  #exposure variable
+             suffix = expa_primary,     #suffix for output data
+             family=0,                  #outcome distribution (linear probability model)
+             includeCovid = TRUE,       #include 2020 and 2021 data
+             includeCovars = TRUE,      #covariate adjustment
+             outputFilename = "expa_primary") #prefix for output file
+
+#########################################################################################
+#STEP 2b. Additional code for changing outcome distribution, checking residuals, and figures
+# Outcome: SNF Length of Stay
+#########################################################################################
+#SNF length of stay (days)
+did_function(dataset = abbrev_foia_11_21_12062024, outcome = snf_loscnt, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_los_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_los_wCovid_adj") #linear
+did_function(dataset = abbrev_foia_11_21_12062024, outcome = snf_loscnt, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_los_wCovid_gamma, family=2, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_los_wCovid_gamma") #GLM
+
+residuals_los <- residuals(did_model_expa_los_wCovid_adj)
+sd_residuals_los <- sd(residuals_los)
+standardized_residuals_los <- residuals_los / sd_residuals_los
+jpeg("qq_expa_los_wCovid_adj.jpg",width = 500, height = 500, res=72)
+  qqnorm(standardized_residuals_los, main = "LOS Adjusted~ Exposure A: Q-Q Plot of Standardized Residuals")  #858x858
+  qqline(standardized_residuals_los, col = "red")
+dev.off()
+
+jpeg("qq_expa_los_wCovid_adj_gamma.jpg",width = 500, height = 500, res=72)
+  qqnorm(residuals(did_model_expa_los_wCovid_gamma, type = "deviance"), main = "LOS (gamma) Adjusted ~ Exposure A: Q-Q Plot of Deviance Residuals")  #858x858
+  qqline(residuals(did_model_expa_los_wCovid_gamma, type = "deviance"), col = "red")
+dev.off()
+
+
+#LOS >= 21 days adjusted (linear)
+abbrev_foia_11_21_12062024 <- abbrev_foia_11_21_12062024 %>% mutate(los_21 = ifelse(snf_loscnt >=21, 1, 0))
+did_function(dataset = abbrev_foia_11_21_12062024, outcome = los_21, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_los21_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_los21_wCovid_adj")
+
+
+###############################################################################
+#STEP 2c. Successful Community Discharge
+###############################################################################
+#100-day community discharge 
+did_function(dataset = abbrev_foia_11_21_12062024, outcome = successful_discharge, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_successful_discharge_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_successful_discharge_wCovid_adj")
+
+
+
+###############################################################################
+#STEP 3. Stratified models by SNF characteristics 
+###############################################################################
+
+
+###############################################################################
+#STEP 3a. Stratified by SNF size
+###############################################################################
+#Small
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(totbeds_q_15==1), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_smallsnf_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_smallsnf_readmit_wCovid_adj")
+
+#Large
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(totbeds_q_15==4), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_largesnf_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_smallsnf_readmit_wCovid_adj")
+
+
+###############################################################################
+#STEP 3b. Stratified by direct care hours
+###############################################################################
+dcare_df <- fread("/project/Burke_SNF_VBP/Analysis_2022/prog/Norman/SAS/FacPatCare_062624.csv") %>% 
+  filter(year == 2014 & is.na(dchrppd) == FALSE & dchrppd != ".") %>% 
+  mutate(dchrppd_num = as.numeric(dchrppd), snf_prvdr_num = PROV1680) %>% 
+  mutate(dcare_quart = cut(dchrppd_num, 
+                           breaks = quantile(dchrppd_num, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE),
+                           labels = c(1, 2, 3, 4),
+                           include.lowest = TRUE))
+abbrev_foia_11_21_12062024 <- abbrev_foia_11_21_12062024 %>% 
+  left_join(dcare_df %>% select(snf_prvdr_num, dcare_quart)) 
+
+#Low
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(dcare_quart==1), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_lowdch_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_lowdch_readmit_wCovid_adj")
+
+#High
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(dcare_quart==4), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_highdch_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_highdch_readmit_wCovid_adj")
+
+
+
+###############################################################################
+#STEP 3c. Stratified by SNF profit type
+###############################################################################
+#For Profit
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(profit_15==1), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_profit_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_profit_readmit_wCovid_adj")
+
+#Not for Profit
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(profit_15==0), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_notprofit_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_notprofit_readmit_wCovid_adj")
+
+
+
+
+###############################################################################
+#STEP 3d. Stratified by ownership type
+###############################################################################
+#Chain owner
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(multifac_15==1), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_chain_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_chain_readmit_wCovid_adj")
+
+
+#Not chain owned
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(multifac_15==0), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_notchain_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_notchain_readmit_wCovid_adj")
+
+
+###############################################################################
+#STEP 3e. Stratified by net operating margin
+###############################################################################
+#Below Mean
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(nom15_binary==0), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_belownom_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_belownom_readmit_wCovid_adj")
+
+#Above Mean
+did_function(dataset = abbrev_foia_11_21_12062024 %>% filter(nom15_binary==1), outcome = readmit, baselineYear = 2015, exposureVar = exposure_a, 
+                suffix = expa_abovenom_readmit_wCovid_adj, family=0, includeCovid = TRUE, includeCovars = TRUE, outputFilename = "expa_belownom_readmit_wCovid_adj")
+
+
+###############################################################################
+#STEP 4. Figures
+###############################################################################
+#Observed  Readmission Rates by Low vs High Quartile Medicare Bed Days
+exposure_a_read_pyear <- abbrev_foia_11_21_12062024 %>%
+  group_by(year, exposure_a) %>%
+  summarise(avg_annual_read_rate = mean(annual_read_rate, na.rm = TRUE)) %>%
+  ungroup()
+
+jpeg("readmin_exposurea_pyear.jpg",width = 1024, height = 480, res=72)
+ggplot(exposure_a_read_pyear %>% filter (!is.na(exposure_a)), aes(x=year, y=avg_annual_read_rate, group=factor(exposure_a), color=factor(exposure_a))) +
+  geom_line()+
+  labs(color = "Medicare Bed Days", x="Year", y="Mean Readmission Rate") +
+  ggtitle("Observed Readmission Rates by Low vs High Quartile Medicare Bed Days") +
+  scale_y_continuous(limits = c(0, .25), breaks = seq(0, 0.25, by = 0.05), minor_breaks = seq(0, 0.25, by = 0.01)) +
+  scale_x_continuous(limits = c(2011, 2021), breaks = seq(2011, 2021, by = 2)) +
+  scale_color_brewer(palette = "Set1"
+                     , labels = c("0" = "Low Quartile", "1" = "High Quartile")
+  )+
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), panel.grid.major = element_line(color="gray80", size = 0.75), panel.grid.minor = element_line(color="gray90", size = 0.5),
+        axis.title = element_text(size = 18), plot.title = element_text(size = 20, hjust = 0.5),
+        axis.text = element_text(size = 16, color = "black"),
+        legend.position = c(0.85, 0.2),  legend.background = element_rect(fill = "white", color = "gray90"), legend.title = element_text(size = 16), legend.text = element_text(size = 16))
+dev.off()
+
+
+
+
+#Observed  Mortality Rates by Low vs High Quartile Medicare Bed Days
+exposure_a_mort_pyear <- abbrev_foia_11_21_12062024 %>%
+  group_by(year, exposure_a) %>%
+  summarise(avg_annual_mort_rate = mean(annual_mortality_rate, na.rm = TRUE)) %>%
+  ungroup()
+
+jpeg("mortality_exposurea_pyear.jpg",width = 1024, height = 480, res=72)
+ggplot(exposure_a_mort_pyear %>% filter (!is.na(exposure_a)), aes(x=year, y=avg_annual_mort_rate, group=factor(exposure_a), color=factor(exposure_a))) +
+  geom_line()+
+  labs(color = "Medicare Bed Days", x="Year", y="Mean Mortality Rate") +
+  ggtitle("Observed Mortality Rates by Low vs High Quartile Medicare Bed Days") +
+  scale_y_continuous(limits = c(0, .12), breaks = seq(0, 0.12, by = 0.03), minor_breaks = seq(0, 0.12, by = 0.01)) +
+  scale_x_continuous(limits = c(2011, 2021), breaks = seq(2011, 2021, by = 2)) +
+  scale_color_brewer(palette = "Set1"
+                     , labels = c("0" = "Low Quartile", "1" = "High Quartile")
+  )+
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), panel.grid.major = element_line(color="gray80", size = 0.75), panel.grid.minor = element_line(color="gray90", size = 0.5),
+        axis.title = element_text(size = 18), plot.title = element_text(size = 20, hjust = 0.5),
+        axis.text = element_text(size = 16, color = "black"),
+        legend.position = c(0.85, 0.2),  legend.background = element_rect(fill = "white", color = "gray90"), legend.title = element_text(size = 16), legend.text = element_text(size = 16))
+dev.off()
+
+
+
+
+#Observed  Rate of Combined Readmission or Mortality by Low vs High Quartile Medicare Bed Days
+abbrev_foia_11_21_12062024$death_readmit <- ifelse(abbrev_foia_11_21_12062024$death == 1 | abbrev_foia_11_21_12062024$readmit == 1, 1, 0)
+death_readmit_exposurea <- abbrev_foia_11_21_12062024 %>%
+  group_by(year, exposure_a) %>%
+  summarise(average_death_readmit_rate = mean(death_readmit, na.rm = TRUE)) %>%
+  ungroup()
+
+jpeg("readminmortality_exposurea_pyear.jpg",width = 1024, height = 480, res=72)
+ggplot(death_readmit_exposurea %>% filter (!is.na(exposure_a)), aes(x=year, y=average_death_readmit_rate, group=factor(exposure_a), color=factor(exposure_a))) +
+  geom_line()+
+  labs(color = "Medicare Bed Days", x="Year", y="Mean Readmission/Mortality Rate") +
+  ggtitle("Observed Readmission/Mortality Rates by Low vs High Quartile Medicare Bed Days") +
+  scale_y_continuous(limits = c(0, .3), breaks = seq(0, 0.3, by = 0.06), minor_breaks = seq(0, 0.3, by = 0.02)) +
+  scale_x_continuous(limits = c(2011, 2021), breaks = seq(2011, 2021, by = 2)) +
+  scale_color_brewer(palette = "Set1"
+                     , labels = c("0" = "Low Quartile", "1" = "High Quartile")
+  )+
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), panel.grid.major = element_line(color="gray80", size = 0.75), panel.grid.minor = element_line(color="gray90", size = 0.5),
+        axis.title = element_text(size = 18), plot.title = element_text(size = 20, hjust = 0.5),
+        axis.text = element_text(size = 16, color = "black"),
+        legend.position = c(0.85, 0.2),  legend.background = element_rect(fill = "white", color = "gray90"), legend.title = element_text(size = 16), legend.text = element_text(size = 16))
+dev.off()
+
+
+
+
+#Observed Rate of 100-Day Community Discharge Success by Low vs High Quartile Medicare Bed Days
+exposure_a_sd_pyear <- abbrev_foia_11_21_12062024 %>%
+  group_by(year, exposure_a) %>%
+  summarise(avg_annual_sd_rate = mean(annual_sd_rate, na.rm = TRUE)) %>%
+  ungroup()
+
+jpeg("Successfuldis_exposurea_pyear.jpg",width = 1024, height = 480, res=72)
+ggplot(exposure_a_sd_pyear %>% filter (!is.na(exposure_a)), aes(x=year, y=avg_annual_sd_rate, group=factor(exposure_a), color=factor(exposure_a))) +
+  geom_line()+
+  labs(color = "Medicare Bed Days", x="Year", y="Mean Successful Discharge Rate") +
+  ggtitle("Observed 100-Day Community Discharge Success Rates by Low vs High Quartile Medicare Bed Days") +
+  scale_y_continuous(limits = c(0, .625), breaks = seq(0, 0.625, by = 0.1), minor_breaks = seq(0, 0.625, by = 0.025), expand = c(-0.04,0.05)) +
+  scale_x_continuous(limits = c(2011, 2021), breaks = seq(2011, 2021, by = 2)) +
+  scale_color_brewer(palette = "Set1"
+                     , labels = c("0" = "Low Quartile", "1" = "High Quartile")
+  )+
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), panel.grid.major = element_line(color="gray80", size = 0.75), panel.grid.minor = element_line(color="gray90", size = 0.5),
+        axis.title = element_text(size = 18), plot.title = element_text(size = 20, hjust = 0.5),
+        axis.text = element_text(size = 16, color = "black"),
+        legend.position = c(0.85, 0.2),  legend.background = element_rect(fill = "white", color = "gray90"), legend.title = element_text(size = 16), legend.text = element_text(size = 16))
+dev.off()
+
+
+
+
+
+#Observed Median SNF Length of Stay by Low vs High Quartile Medicare Bed Days
+exposure_a_los_pyear <- abbrev_foia_11_21_12062024 %>%
+  group_by(year, exposure_a) %>%
+  summarise(median_annual_los = median(snf_loscnt, na.rm = TRUE)) %>%
+  ungroup()
+
+jpeg("medlos_exposurea_pyear.jpg",width = 1024, height = 480, res=72)
+ggplot(exposure_a_los_pyear %>% filter (!is.na(exposure_a)), aes(x=year, y=median_annual_los, group=factor(exposure_a), color=factor(exposure_a))) +
+  geom_line()+
+  labs(color = "Medicare Bed Days", x="Year", y="Median SNF LOS") +
+  ggtitle("Observed Median SNF LOS by Low vs High Quartile Medicare Bed Days") +
+  scale_y_continuous(limits = c(0, 25), breaks = seq(0, 25, by = 5), minor_breaks = seq(0, 25, by = 1)) +
+  scale_x_continuous(limits = c(2011, 2021), breaks = seq(2011, 2021, by = 2)) +
+  scale_color_brewer(palette = "Set1"
+                     , labels = c("0" = "Low Quartile", "1" = "High Quartile")
+  )+
+  theme_minimal() +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), panel.grid.major = element_line(color="gray80", size = 0.75), panel.grid.minor = element_line(color="gray90", size = 0.5),
+        axis.title = element_text(size = 18), plot.title = element_text(size = 20, hjust = 0.5),
+        axis.text = element_text(size = 16, color = "black"),
+        legend.position = c(0.85, 0.2),  legend.background = element_rect(fill = "white", color = "gray90"), legend.title = element_text(size = 16), legend.text = element_text(size = 16))
+dev.off()
+
+
+
+
+
+
+
+
